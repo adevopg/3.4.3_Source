@@ -66,6 +66,23 @@ endif()
 include(ConfigureBaseTargets)
 include(CheckPlatform)
 
+# Optionally enable hiredis support for ChatBridge (optional Redis client)
+option(USE_HIREDIS "Enable hiredis publisher/subscriber support" OFF)
+if (USE_HIREDIS)
+  find_path(HIREDIS_INCLUDE_DIR hiredis/hiredis.h)
+  find_library(HIREDIS_LIBRARY hiredis)
+  if (HIREDIS_INCLUDE_DIR AND HIREDIS_LIBRARY)
+    message(STATUS "Found hiredis: ${HIREDIS_LIBRARY}")
+    add_definitions(-DUSE_HIREDIS)
+    include_directories(${HIREDIS_INCLUDE_DIR})
+    # make the variable available for target linking in subprojects
+    set(HIREDIS_FOUND 1 CACHE INTERNAL "hiredis found")
+    set(HIREDIS_LIB ${HIREDIS_LIBRARY} CACHE INTERNAL "hiredis lib")
+  else()
+    message(FATAL_ERROR "USE_HIREDIS requested but hiredis not found. Install hiredis or disable USE_HIREDIS.")
+  endif()
+endif()
+
 include(GroupSources)
 include(AutoCollect)
 

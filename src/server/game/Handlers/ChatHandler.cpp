@@ -22,6 +22,7 @@
 #include "Chat.h"
 #include "ChatPackets.h"
 #include "Common.h"
+#include "ChatBridge.h"
 #include "CreatureAI.h"
 #include "DB2Stores.h"
 #include "GameTime.h"
@@ -257,6 +258,14 @@ void WorldSession::HandleChatMessage(ChatMsg type, Language lang, std::string ms
             }
 
             sender->Say(msg, lang);
+            // Publish say to bridge
+            try
+            {
+                std::string from = GetPlayer()->GetName(); if (from.size() > 32) from = from.substr(0,32);
+                std::string m = msg; if (m.size() > 1024) m = m.substr(0,1024);
+                std::string json = "{\"type\":\"say\",\"from\":\"" + from + "\",\"message\":\"" + m + "\"}";
+                ChatBridge::Instance().Publish("chat:in:say", json);
+            } catch (...) { }
             break;
         }
         case CHAT_MSG_EMOTE:
@@ -272,6 +281,14 @@ void WorldSession::HandleChatMessage(ChatMsg type, Language lang, std::string ms
             }
 
             sender->TextEmote(msg);
+            // Publish emote to bridge
+            try
+            {
+                std::string from = GetPlayer()->GetName(); if (from.size() > 32) from = from.substr(0,32);
+                std::string m = msg; if (m.size() > 1024) m = m.substr(0,1024);
+                std::string json = "{\"type\":\"emote\",\"from\":\"" + from + "\",\"message\":\"" + m + "\"}";
+                ChatBridge::Instance().Publish("chat:in:emote", json);
+            } catch (...) { }
             break;
         }
         case CHAT_MSG_YELL:
@@ -287,6 +304,14 @@ void WorldSession::HandleChatMessage(ChatMsg type, Language lang, std::string ms
             }
 
             sender->Yell(msg, lang);
+            // Publish yell to bridge
+            try
+            {
+                std::string from = GetPlayer()->GetName(); if (from.size() > 32) from = from.substr(0,32);
+                std::string m = msg; if (m.size() > 1024) m = m.substr(0,1024);
+                std::string json = "{\"type\":\"yell\",\"from\":\"" + from + "\",\"message\":\"" + m + "\"}";
+                ChatBridge::Instance().Publish("chat:in:yell", json);
+            } catch (...) { }
             break;
         }
         case CHAT_MSG_WHISPER:
@@ -336,6 +361,16 @@ void WorldSession::HandleChatMessage(ChatMsg type, Language lang, std::string ms
                 sender->AddWhisperWhiteList(receiver->GetGUID());
 
             GetPlayer()->Whisper(msg, lang, receiver);
+            // Publish whisper to bridge (sanitized)
+            try
+            {
+                std::string from = GetPlayer()->GetName(); if (from.size() > 32) from = from.substr(0,32);
+                std::string to = receiver->GetName(); if (to.size() > 32) to = to.substr(0,32);
+                std::string m = msg; if (m.size() > 1024) m = m.substr(0,1024);
+                // publish to per-receiver channel so only intended receiver webs can subscribe
+                std::string json = "{\"type\":\"whisper\",\"from\":\"" + from + "\",\"to\":\"" + to + "\",\"fromGuid\":\"" + GetPlayer()->GetGUID().ToString() + "\",\"message\":\"" + m + "\"}";
+                ChatBridge::Instance().Publish(std::string("chat:in:whisper:") + receiver->GetGUID().ToString(), json);
+            } catch (...) { }
             break;
         }
         case CHAT_MSG_PARTY:
@@ -357,6 +392,18 @@ void WorldSession::HandleChatMessage(ChatMsg type, Language lang, std::string ms
             WorldPackets::Chat::Chat packet;
             packet.Initialize(ChatMsg(type), lang, sender, nullptr, msg);
             group->BroadcastPacket(packet.Write(), false, group->GetMemberGroup(GetPlayer()->GetGUID()));
+            // Publish party message to bridge
+            try
+            {
+                std::string from = GetPlayer()->GetName(); if (from.size() > 32) from = from.substr(0,32);
+                std::string m = msg; if (m.size() > 1024) m = m.substr(0,1024);
+                if (group && group->IsMember(GetPlayer()->GetGUID()))
+                {
+                    uint32 gid = group->GetDbStoreId();
+                    std::string json = "{\"type\":\"party\",\"groupId\":" + std::to_string(gid) + ",\"from\":\"" + from + "\",\"message\":\"" + m + "\"}";
+                    ChatBridge::Instance().Publish(std::string("chat:in:party:") + std::to_string(gid), json);
+                }
+            } catch (...) { }
             break;
         }
         case CHAT_MSG_GUILD:
@@ -368,6 +415,21 @@ void WorldSession::HandleChatMessage(ChatMsg type, Language lang, std::string ms
                     sScriptMgr->OnPlayerChat(GetPlayer(), type, lang, msg, guild);
 
                     guild->BroadcastToGuild(this, false, msg, lang == LANG_ADDON ? LANG_ADDON : LANG_UNIVERSAL);
+                    // Publish to external bridge for web clients (json: {type: "guild", guildId, from, message})
+                    try
+                    {
+                        // sanitize and limit lengths
+                        std::string from = GetPlayer()->GetName();
+                        if (from.size() > 32) from = from.substr(0,32);
+                        std::string m = msg;
+                        if (m.size() > 1024) m = m.substr(0,1024);
+                        // build JSON and rely on ChatBridge escaping
+                        uint32 guildId = GetPlayer()->GetGuildId();
+                        std::string json = "{\"type\":\"guild\",\"guildId\":" + std::to_string(guildId) +
+                            ",\"from\":\"" + from + "\",\"message\":\"" + m + "\"}";
+                        ChatBridge::Instance().Publish(std::string("chat:in:guild:") + std::to_string(guildId), json);
+                    }
+                    catch (...) { }
                 }
             }
             break;
@@ -381,6 +443,16 @@ void WorldSession::HandleChatMessage(ChatMsg type, Language lang, std::string ms
                     sScriptMgr->OnPlayerChat(GetPlayer(), type, lang, msg, guild);
 
                     guild->BroadcastToGuild(this, true, msg, lang == LANG_ADDON ? LANG_ADDON : LANG_UNIVERSAL);
+                    // Publish officer message to bridge
+                    try
+                    {
+                        std::string from = GetPlayer()->GetName(); if (from.size() > 32) from = from.substr(0,32);
+                        std::string m = msg; if (m.size() > 1024) m = m.substr(0,1024);
+                        uint32 guildId = GetPlayer()->GetGuildId();
+                        std::string json = "{\"type\":\"officer\",\"guildId\":" + std::to_string(guildId) +
+                            ",\"from\":\"" + from + "\",\"message\":\"" + m + "\"}";
+                        ChatBridge::Instance().Publish(std::string("chat:in:officer:") + std::to_string(guildId), json);
+                    } catch (...) { }
                 }
             }
             break;
@@ -399,6 +471,18 @@ void WorldSession::HandleChatMessage(ChatMsg type, Language lang, std::string ms
             WorldPackets::Chat::Chat packet;
             packet.Initialize(ChatMsg(type), lang, sender, nullptr, msg);
             group->BroadcastPacket(packet.Write(), false);
+            // Publish raid message to bridge
+            try
+            {
+                std::string from = GetPlayer()->GetName(); if (from.size() > 32) from = from.substr(0,32);
+                std::string m = msg; if (m.size() > 1024) m = m.substr(0,1024);
+                if (group && group->IsMember(GetPlayer()->GetGUID()))
+                {
+                    uint32 gid = group->GetDbStoreId();
+                    std::string json = "{\"type\":\"raid\",\"groupId\":" + std::to_string(gid) + ",\"from\":\"" + from + "\",\"message\":\"" + m + "\"}";
+                    ChatBridge::Instance().Publish(std::string("chat:in:raid:") + std::to_string(gid), json);
+                }
+            } catch (...) { }
             break;
         }
         case CHAT_MSG_RAID_WARNING:
@@ -413,6 +497,18 @@ void WorldSession::HandleChatMessage(ChatMsg type, Language lang, std::string ms
             //in battleground, raid warning is sent only to players in battleground - code is ok
             packet.Initialize(CHAT_MSG_RAID_WARNING, lang, sender, nullptr, msg);
             group->BroadcastPacket(packet.Write(), false);
+            // Publish raid warning to bridge
+            try
+            {
+                std::string from = GetPlayer()->GetName(); if (from.size() > 32) from = from.substr(0,32);
+                std::string m = msg; if (m.size() > 1024) m = m.substr(0,1024);
+                if (group && group->IsMember(GetPlayer()->GetGUID()))
+                {
+                    uint32 gid = group->GetDbStoreId();
+                    std::string json = "{\"type\":\"raid_warning\",\"groupId\":" + std::to_string(gid) + ",\"from\":\"" + from + "\",\"message\":\"" + m + "\"}";
+                    ChatBridge::Instance().Publish(std::string("chat:in:raid_warning:") + std::to_string(gid), json);
+                }
+            } catch (...) { }
             break;
         }
         case CHAT_MSG_CHANNEL:
@@ -437,6 +533,22 @@ void WorldSession::HandleChatMessage(ChatMsg type, Language lang, std::string ms
 
                 sScriptMgr->OnPlayerChat(sender, type, lang, msg, chn);
                 chn->Say(sender->GetGUID(), msg, lang);
+                // Publish channel message to bridge
+                try
+                {
+                    // if channel has an id, use it; otherwise fall back to name
+                    std::string channelKey = target;
+                    uint32 chanId = 0;
+                    if (chn)
+                        chanId = chn->GetChannelId();
+                    if (chanId)
+                        channelKey = std::to_string(chanId);
+
+                    std::string from = GetPlayer()->GetName(); if (from.size() > 32) from = from.substr(0,32);
+                    std::string m = msg; if (m.size() > 1024) m = m.substr(0,1024);
+                    std::string json = "{\"type\":\"channel\",\"channel\":\"" + channelKey + "\",\"from\":\"" + from + "\",\"message\":\"" + m + "\"}";
+                    ChatBridge::Instance().Publish(std::string("chat:in:channel:") + channelKey, json);
+                } catch (...) { }
             }
             break;
         }
@@ -454,6 +566,18 @@ void WorldSession::HandleChatMessage(ChatMsg type, Language lang, std::string ms
             WorldPackets::Chat::Chat packet;
             packet.Initialize(ChatMsg(type), lang, sender, nullptr, msg);
             group->BroadcastPacket(packet.Write(), false);
+            // Publish instance chat to bridge
+            try
+            {
+                std::string from = GetPlayer()->GetName(); if (from.size() > 32) from = from.substr(0,32);
+                std::string m = msg; if (m.size() > 1024) m = m.substr(0,1024);
+                if (group && group->IsMember(GetPlayer()->GetGUID()))
+                {
+                    uint32 gid = group->GetDbStoreId();
+                    std::string json = "{\"type\":\"instance\",\"groupId\":" + std::to_string(gid) + ",\"from\":\"" + from + "\",\"message\":\"" + m + "\"}";
+                    ChatBridge::Instance().Publish(std::string("chat:in:instance:") + std::to_string(gid), json);
+                }
+            } catch (...) { }
             break;
         }
         default:

@@ -1,0 +1,196 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Chat Bridge Example</title>
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+</head>
+<body>
+  <h1>Chat Bridge Example</h1>
+  <div>
+    <label>Username: <input id="user" /></label>
+    <label>Password: <input id="pass" type="password" /></label>
+    <button id="login">Login (plain)</button>
+  </div>
+  <div style="margin-top:8px">
+    <label>Character: <select id="charSelect"><option value="">(not loaded)</option></select></label>
+  </div>
+  <div>
+    <label>Subscribe channel: <input id="subchan" /></label>
+    <button id="sub">Subscribe</button>
+    <button id="unsub">Unsubscribe</button>
+  </div>
+  <hr />
+  <div>
+    <label>Chat type:
+      <select id="chattype">
+        <option value="say">Say</option>
+        <option value="yell">Yell</option>
+        <option value="emote">Emote</option>
+        <option value="whisper">Whisper</option>
+        <option value="guild">Guild</option>
+        <option value="officer">Officer</option>
+        <option value="party">Party</option>
+        <option value="raid">Raid</option>
+        <option value="raid_warning">Raid Warning</option>
+        <option value="instance">Instance</option>
+        <option value="channel">Channel</option>
+      </select>
+    </label>
+    <div id="extraInputs" style="margin-top:8px">
+      <label id="lblTarget" style="display:none">Target (name or id): <input id="target" /></label>
+      <label id="lblChannel" style="display:none">Channel name/id: <input id="channel" /></label>
+      <label id="lblGuild" style="display:none">Guild id: <input id="guildId" /></label>
+    </div>
+    <div style="margin-top:8px">
+      <textarea id="message" rows="3" cols="60" placeholder="Write your message..."></textarea>
+    </div>
+    <div style="margin-top:8px">
+      <button id="sendMsg">Send</button>
+    </div>
+  </div>
+  <div>
+    <button id="connect">Connect WebSocket</button>
+    <button id="send">Send Test Guild Message</button>
+  </div>
+  <pre id="log"></pre>
+  <h2>Incoming Messages</h2>
+  <div id="inbox" style="border:1px solid #ccc;padding:8px;max-height:300px;overflow:auto"></div>
+
+  <script>
+    let token = null;
+    const log = (s) => { document.getElementById('log').textContent += s + '\n'; };
+
+    document.getElementById('login').addEventListener('click', async () => {
+      const u = document.getElementById('user').value;
+      const p = document.getElementById('pass').value;
+      const r = await fetch('/login', { method: 'POST', headers: { 'Content-Type':'application/json'}, body: JSON.stringify({ username: u, password: p }) });
+      const j = await r.json();
+      if (j.token) { token = j.token; log('logged in'); } else log('login failed ' + JSON.stringify(j));
+      // load characters for this account
+      if (j.token) {
+        try {
+          const r2 = await fetch('/chars', { headers: { Authorization: 'Bearer ' + j.token } });
+          const data = await r2.json();
+          const sel = document.getElementById('charSelect'); sel.innerHTML = '';
+          if (data.chars) {
+            data.chars.forEach(c => { const opt = document.createElement('option'); opt.value = c.guid; opt.textContent = c.name + ' (' + c.guid + ')'; sel.appendChild(opt); });
+            log('chars loaded: ' + data.chars.length);
+          } else {
+            const opt = document.createElement('option'); opt.value = ''; opt.textContent = '(no chars)'; sel.appendChild(opt);
+          }
+        } catch (e) { log('failed to load chars'); }
+      }
+    });
+
+    let socket;
+    document.getElementById('connect').addEventListener('click', () => {
+      if (!token) { log('no token'); return; }
+      socket = io('/', { auth: { token } });
+      socket.on('connect', () => log('ws connected')); 
+      socket.on('chat', (m) => {
+        // attempt to normalize incoming shape { channel, payload } or raw payload
+        const chan = m.channel || (m.channelName || 'unknown');
+        const payload = m.payload || m;
+        const el = document.createElement('div');
+        el.style.borderBottom = '1px solid #eee';
+        el.style.padding = '6px 4px';
+        const header = document.createElement('div');
+        header.style.fontSize = '12px';
+        header.style.color = '#555';
+        header.textContent = `[${chan}] ${payload.type || ''} from ${payload.fromName || payload.from || payload.accountId || ''}`;
+        const body = document.createElement('div');
+        body.textContent = payload.message || JSON.stringify(payload);
+        const actions = document.createElement('div');
+        actions.style.marginTop = '6px';
+        const replyBtn = document.createElement('button');
+        replyBtn.textContent = 'Reply';
+        replyBtn.addEventListener('click', () => {
+          // prepare reply: choose appropriate type and target
+          if (payload.type === 'whisper') {
+            chattype.value = 'whisper';
+            target.value = payload.fromName || payload.from || '';
+          } else if (payload.type === 'channel') {
+            chattype.value = 'channel';
+            channel.value = payload.channel || '';
+          } else if (payload.type === 'guild' || payload.type === 'officer') {
+            chattype.value = payload.type;
+            guildId.value = payload.guildId || payload.guildId || '';
+          } else {
+            chattype.value = 'say';
+          }
+          document.getElementById('message').value = `RE: ${payload.message || ''}`;
+        });
+        actions.appendChild(replyBtn);
+        el.appendChild(header);
+        el.appendChild(body);
+        el.appendChild(actions);
+        const inbox = document.getElementById('inbox');
+        inbox.insertBefore(el, inbox.firstChild);
+      });
+      socket.on('subscribed', (c) => log('subscribed ' + c));
+      socket.on('unsubscribed', (c) => log('unsubscribed ' + c));
+      socket.on('sent', (r) => log('sent ack: ' + JSON.stringify(r)));
+      // persist session in sessionStorage
+      sessionStorage.setItem('chat_token', token);
+      document.getElementById('connect').style.display = 'none';
+      document.getElementById('logout').style.display = '';
+    });
+
+    // restore token if present
+    window.addEventListener('load', () => {
+      const saved = sessionStorage.getItem('chat_token');
+      if (saved) { token = saved; log('restored token'); }
+    });
+
+    // logout
+    const logoutBtn = document.createElement('button');
+    logoutBtn.id = 'logout'; logoutBtn.textContent = 'Logout'; logoutBtn.style.display = 'none';
+    document.body.insertBefore(logoutBtn, document.getElementById('log'));
+    logoutBtn.addEventListener('click', () => { sessionStorage.removeItem('chat_token'); token = null; logoutBtn.style.display = 'none'; document.getElementById('connect').style.display = ''; });
+
+    document.getElementById('sub').addEventListener('click', () => {
+      const c = document.getElementById('subchan').value;
+      if (!socket) return log('not connected');
+      socket.emit('subscribe', c);
+    });
+    document.getElementById('unsub').addEventListener('click', () => {
+      const c = document.getElementById('subchan').value;
+      if (!socket) return log('not connected');
+      socket.emit('unsubscribe', c);
+    });
+
+    const chattype = document.getElementById('chattype');
+    const target = document.getElementById('target');
+    const channel = document.getElementById('channel');
+    const guildId = document.getElementById('guildId');
+    const lblTarget = document.getElementById('lblTarget');
+    const lblChannel = document.getElementById('lblChannel');
+    const lblGuild = document.getElementById('lblGuild');
+
+    chattype.addEventListener('change', () => {
+      lblTarget.style.display = 'none';
+      lblChannel.style.display = 'none';
+      lblGuild.style.display = 'none';
+      const v = chattype.value;
+      if (v === 'whisper') lblTarget.style.display = '';
+      if (v === 'channel') lblChannel.style.display = '';
+      if (v === 'guild' || v === 'officer') lblGuild.style.display = '';
+    });
+
+    document.getElementById('sendMsg').addEventListener('click', () => {
+      if (!socket) return log('not connected');
+      const type = chattype.value;
+      const payload = { type, message: document.getElementById('message').value };
+      const sel = document.getElementById('charSelect');
+      // always include charGuid: prefer selected character; if not present include empty string
+      payload.charGuid = sel && sel.value ? String(sel.value) : '';
+      if (type === 'whisper') payload.target = target.value;
+      if (type === 'channel') payload.channel = channel.value;
+      if (type === 'guild' || type === 'officer') payload.guildId = guildId.value;
+      socket.emit('send', payload);
+      log('sent payload: ' + JSON.stringify(payload));
+    });
+  </script>
+</body>
+</html>

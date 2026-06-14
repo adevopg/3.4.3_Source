@@ -20,6 +20,7 @@
 */
 
 #include "World.h"
+#include "Config.h"
 #include "AccountMgr.h"
 #include "AchievementMgr.h"
 #include "AreaTriggerDataStore.h"
@@ -61,6 +62,7 @@
 #include "IPLocation.h"
 #include "InstanceLockMgr.h"
 #include "LFGMgr.h"
+#include "LFGListMgr.h"
 #include "Language.h"
 #include "LanguageMgr.h"
 #include "Log.h"
@@ -103,6 +105,7 @@
 #include "WorldSession.h"
 #include "WorldSocket.h"
 #include "WorldStateMgr.h"
+#include "Chat/ChatBridge.h"
 
 #include <boost/algorithm/string.hpp>
 
@@ -2555,6 +2558,9 @@ void World::Update(uint32 diff)
 
     sWorldUpdateTime.UpdateWithDiff(diff);
 
+    // Process any incoming web chat messages queued by ChatBridge subscriber thread
+    ChatBridge::Instance().ProcessIncoming();
+
     ///- Update the different timers
     for (int i = 0; i < WUPDATE_COUNT; ++i)
     {
@@ -2757,6 +2763,11 @@ void World::Update(uint32 diff)
     {
         TC_METRIC_TIMER("world_update_time", TC_METRIC_TAG("type", "Update LFG"));
         sLFGMgr->Update(diff);
+    }
+	
+	{
+        TC_METRIC_TIMER("world_update_time", TC_METRIC_TAG("type", "Update LFGListMgr"));
+        sLFGListMgr->Update(diff);
     }
 
     {

@@ -55,6 +55,7 @@
 #include "WorldSocket.h"
 #include "WorldSocketMgr.h"
 #include "Util.h"
+#include "Chat/ChatBridge.h"
 #include <openssl/opensslv.h>
 #include <openssl/crypto.h>
 #include <boost/asio/signal_set.hpp>
@@ -424,6 +425,9 @@ extern int main(int argc, char** argv)
     {
         cliThread.reset(new std::thread(CliThread), &ShutdownCLIThread);
     }
+
+    // Start ChatBridge subscriber thread to receive web->game messages via Redis
+    ChatBridge::Instance().StartSubscriber();
 
     WorldUpdateLoop();
 

@@ -1547,6 +1547,7 @@ enum OpcodeServer : uint16
     SMSG_PARTY_MEMBER_PARTIAL_STATE                   = 0x2758,
     SMSG_PARTY_NOTIFY_LFG_LEADER_CHANGE               = 0x2877,
     SMSG_PARTY_UPDATE                                 = 0x25F4,
+    SMSG_LFG_LIST_UNKNOWN                             = 0x25F5,
     SMSG_PAUSE_MIRROR_TIMER                           = 0x2710,
     SMSG_PENDING_RAID_LOCK                            = 0x26F8,
     SMSG_PETITION_ALREADY_SIGNED                      = 0x259F,

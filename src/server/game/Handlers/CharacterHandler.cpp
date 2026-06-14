@@ -282,6 +282,7 @@ public:
     bool Initialize(uint32 accountId, bool withDeclinedNames, bool isDeletedCharacters)
     {
         _isDeletedCharacters = isDeletedCharacters;
+        TC_LOG_INFO("network", "EnumCharactersQueryHolder::Initialize: account=%u, withDeclined=%d, isDeleted=%d", accountId, withDeclinedNames, isDeletedCharacters);
 
         constexpr CharacterDatabaseStatements statements[2][3] =
         {
@@ -354,7 +355,7 @@ void WorldSession::HandleCharEnum(CharacterDatabaseQueryHolder const& holder)
             if (std::vector<UF::ChrCustomizationChoice>* customizationsForChar = Trinity::Containers::MapGetValuePtr(customizations, charInfo.Guid.GetCounter()))
                 charInfo.Customizations = std::move(*customizationsForChar);
 
-            TC_LOG_INFO("network", "Loading char guid {} from account {}.", charInfo.Guid.ToString(), GetAccountId());
+            TC_LOG_ERROR("network", "Loading char guid {} from account {}.", charInfo.Guid.ToString(), GetAccountId());
 
             if (!charEnum.IsDeletedCharacters)
             {
@@ -396,6 +397,7 @@ void WorldSession::HandleCharEnum(CharacterDatabaseQueryHolder const& holder)
         charEnum.RaceUnlockData.push_back(raceUnlock);
     }
 
+    TC_LOG_ERROR("network", "HandleCharEnum: IsDeletedCharacters={}, returning {} characters", charEnum.IsDeletedCharacters, charEnum.Characters.size());
     SendPacket(charEnum.Write());
 }
 
@@ -423,6 +425,7 @@ void WorldSession::HandleCharUndeleteEnumOpcode(WorldPackets::Character::EnumCha
 {
     /// get all the data necessary for loading all undeleted characters (along with their pets) on the account
     std::shared_ptr<EnumCharactersQueryHolder> holder = std::make_shared<EnumCharactersQueryHolder>();
+    TC_LOG_ERROR("network", "HandleCharUndeleteEnumOpcode: request for deleted characters by account {}", GetAccountId());
     if (!holder->Initialize(GetAccountId(), sWorld->getBoolConfig(CONFIG_DECLINED_NAMES_USED), true))
     {
         HandleCharEnum(*holder);
@@ -2631,8 +2634,12 @@ void WorldSession::HandleCharUndeleteOpcode(WorldPackets::Character::UndeleteCha
     stmt->setUInt32(0, GetBattlenetAccountId());
 
     std::shared_ptr<WorldPackets::Character::CharacterUndeleteInfo> undeleteInfo = undeleteCharacter.UndeleteInfo;
+    // Log incoming undelete request for debugging
+    TC_LOG_ERROR("network", "HandleCharUndeleteOpcode: clientToken={}, CharacterGuid={}, GuidLow={}, AccountId={}",
+        undeleteInfo->ClientToken, undeleteInfo->CharacterGuid.ToString(), undeleteInfo->CharacterGuid.GetCounter(), GetAccountId());
+    uint64 counter = undeleteInfo->CharacterGuid.GetCounter();
     _queryProcessor.AddCallback(LoginDatabase.AsyncQuery(stmt)
-        .WithChainingPreparedCallback([this, undeleteInfo](QueryCallback& queryCallback, PreparedQueryResult result)
+        .WithChainingPreparedCallback([this, undeleteInfo, counter](QueryCallback& queryCallback, PreparedQueryResult result)
     {
         if (result)
         {
@@ -2646,15 +2653,26 @@ void WorldSession::HandleCharUndeleteOpcode(WorldPackets::Character::UndeleteCha
         }
 
         CharacterDatabasePreparedStatement* stmt = CharacterDatabase.GetPreparedStatement(CHAR_SEL_CHAR_DEL_INFO_BY_GUID);
-        stmt->setUInt64(0, undeleteInfo->CharacterGuid.GetCounter());
+        stmt->setUInt64(0, counter);
         queryCallback.SetNextQuery(CharacterDatabase.AsyncQuery(stmt));
     })
-        .WithChainingPreparedCallback([this, undeleteInfo](QueryCallback& queryCallback, PreparedQueryResult result)
+        .WithChainingPreparedCallback([this, undeleteInfo, counter](QueryCallback& queryCallback, PreparedQueryResult result)
     {
         if (!result)
         {
-            SendUndeleteCharacterResponse(CHARACTER_UNDELETE_RESULT_ERROR_CHAR_CREATE, undeleteInfo.get());
-            return;
+            TC_LOG_ERROR("network", "HandleCharUndeleteOpcode: no rows for guid (64-bit) {}, trying 32-bit fallback", (unsigned long long)counter);
+            // Fallback: some DB schemas may store guid as 32-bit; try searching with 32-bit counter
+            CharacterDatabasePreparedStatement* stmt2 = CharacterDatabase.GetPreparedStatement(CHAR_SEL_CHAR_DEL_INFO_BY_GUID);
+            stmt2->setUInt32(0, static_cast<uint32>(counter));
+            PreparedQueryResult result2 = CharacterDatabase.Query(stmt2);
+            if (!result2)
+            {
+                TC_LOG_ERROR("network", "HandleCharUndeleteOpcode: fallback also returned no rows for guid {} (low32={})", (unsigned long long)counter, static_cast<uint32>(counter));
+                SendUndeleteCharacterResponse(CHARACTER_UNDELETE_RESULT_ERROR_CHAR_CREATE, undeleteInfo.get());
+                return;
+            }
+            TC_LOG_ERROR("network", "HandleCharUndeleteOpcode: fallback found row for low32={}", static_cast<uint32>(counter));
+            result = std::move(result2);
         }
 
         Field* fields = result->Fetch();

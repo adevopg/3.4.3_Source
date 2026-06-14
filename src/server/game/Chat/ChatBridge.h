@@ -1,0 +1,60 @@
+// Simple outbound bridge helper to publish chat JSON to an external command (e.g. redis-cli)
+#pragma once
+
+#ifdef USE_HIREDIS
+#include <hiredis/hiredis.h>
+#endif
+#include <string>
+#include <queue>
+#include <mutex>
+#include <condition_variable>
+#include <thread>
+#include <unordered_map>
+
+struct ChatMessage
+{
+	std::string channel;
+	std::string message;
+};
+
+struct IncomingWebChat
+{
+	std::string type;
+	std::string charGuid;
+	std::string message;
+	std::string target;
+	std::string channel;
+	uint32_t guildId = 0;
+	uint32_t fromAccount = 0;
+	std::string fromName;
+	std::string rawJson;
+};
+
+class ChatBridge
+{
+public:
+	static ChatBridge& Instance();
+	void Publish(const std::string& channel, const std::string& message);
+	void PushIncoming(IncomingWebChat&& msg);
+	void ProcessIncoming();
+	void StartSubscriber();
+
+private:
+#ifdef USE_HIREDIS
+	redisContext* m_redis = nullptr;
+#endif
+	std::thread m_thread;
+	std::thread m_subThread;
+	bool m_subRunning{false};
+	std::queue<IncomingWebChat> m_incoming;
+	std::mutex m_incomingMutex;
+	std::condition_variable m_incomingCond;
+
+	// presence summons created for remote players: remoteGuid -> summoned creature GUID
+	std::unordered_map<std::string, ObjectGuid> m_presenceSummons;
+	std::mutex m_presenceMutex;
+	ChatBridge() = default;
+	~ChatBridge() = default;
+	ChatBridge(const ChatBridge&) = delete;
+	ChatBridge& operator=(const ChatBridge&) = delete;
+};

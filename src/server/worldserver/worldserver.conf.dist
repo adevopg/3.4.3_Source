@@ -3317,6 +3317,12 @@ CharDelete.KeepDays = 30
 PlayerStart.AllReputation = 0
 
 #
+# Custom Cross-Realm
+#    CrossRealm.Union
+#        Description: Comma separated list of RealmIDs that participate in cross-realm union.
+#        Example:     "1,2,3"
+#        Default:     ""
+CrossRealm.Union = ""
 #    XP.Boost.Daymask
 #        Description: Enables experience boost during the defined days. This field is a bitmask.
 #

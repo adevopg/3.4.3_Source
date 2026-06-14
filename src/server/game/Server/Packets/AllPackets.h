@@ -76,5 +76,6 @@
 #include "WardenPackets.h"
 #include "WhoPackets.h"
 #include "WorldStatePackets.h"
+#include "LfgListPackets.h"
 
 #endif // AllPackets_h__
