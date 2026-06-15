@@ -1603,6 +1603,12 @@ void World::LoadConfigSettings(bool reload)
     m_bool_configs[CONFIG_FEATURE_SYSTEM_CHARACTER_UNDELETE_ENABLED] = sConfigMgr->GetBoolDefault("FeatureSystem.CharacterUndelete.Enabled", false);
     m_int_configs[CONFIG_FEATURE_SYSTEM_CHARACTER_UNDELETE_COOLDOWN] = sConfigMgr->GetIntDefault("FeatureSystem.CharacterUndelete.Cooldown", 2592000);
 
+	//Customer Support System Browser
+    m_bool_configs[CONFIG_FEATURE_SYSTEM_CUSTOMER_SUPPORT_SYSTEM_BROWSER_ENABLED] = sConfigMgr->GetBoolDefault("FeatureSystem.CustomerSupportSystemBrowser.Enabled", false);
+
+	// Voice Chat Feature System
+	m_bool_configs[CONFIG_FEATURE_SYSTEM_VOICE_CHAT_ENABLED] = sConfigMgr->GetBoolDefault("FeatureSystem.VoiceChat.Enabled", false);
+
     // Dungeon finder
     m_int_configs[CONFIG_LFG_OPTIONSMASK] = sConfigMgr->GetIntDefault("DungeonFinder.OptionsMask", 1);
 

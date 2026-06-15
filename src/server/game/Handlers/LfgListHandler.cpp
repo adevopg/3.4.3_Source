@@ -1,14 +1,9 @@
 #include "WorldSession.h"
 #include "LFGListMgr.h"
-#include "Group.h"
-#include "LfgListPackets.h"
-#include "SocialMgr.h"
-#include "Chat.h"
-#include "GameTime.h"
-
-// temp??
 #include "LFGList.h"
-#include "ObjectAccessor.h"
+#include "LfgListPackets.h"
+#include "Chat.h"
+#include "Group.h"
 
 void WorldSession::HandleLfgListJoin(WorldPackets::LfgList::LfgListJoin& packet)
 {
@@ -30,7 +25,7 @@ void WorldSession::HandleLfgListJoin(WorldPackets::LfgList::LfgListJoin& packet)
 void WorldSession::HandleLfgListLeave(WorldPackets::LfgList::LfgListLeave& packet)
 {
     auto entry = sLFGListMgr->GetEntrybyGuidLow(packet.ApplicationTicket.Id);
-    if (!entry || !entry->ApplicationGroup->IsLeader(GetPlayer()->GetGUID()))
+    if (!entry || !entry->ApplicationGroup || !entry->ApplicationGroup->IsLeader(GetPlayer()->GetGUID()))
         return;
 
     sLFGListMgr->Remove(packet.ApplicationTicket.Id, GetPlayer());
@@ -44,7 +39,7 @@ void WorldSession::HandleRequestLfgListBlackList(WorldPackets::LfgList::RequestL
 void WorldSession::HandleLfgListUpdateRequest(WorldPackets::LfgList::LfgListUpdateRequest& packet)
 {
     auto entry = sLFGListMgr->GetEntrybyGuidLow(packet.Ticket.Id);
-    if (!entry || !entry->ApplicationGroup->IsLeader(_player->GetGUID()))
+    if (!entry || !entry->ApplicationGroup || !entry->ApplicationGroup->IsLeader(_player->GetGUID()))
         return;
 
     entry->AutoAccept = packet.UpdateRequest.AutoAccept;
@@ -68,31 +63,10 @@ void WorldSession::HandleLfgListGetStatus(WorldPackets::LfgList::LfgListGetStatu
 
 void WorldSession::HandleLfgListApplyToGroup(WorldPackets::LfgList::LfgListApplyToGroup& packet)
 {
-    /*WorldPacket data(OpcodeServer(SMSG_LFG_LIST_UNKNOWN), 0);
-    data << uint32(0x02);
-    data << uint32(0);
-    data << _player->GetGUID();
-    data << packet.application.ApplicationTicket.RequesterGuid;
-    _player->GetSession()->SendPacket(&data, true);*/
-
-    if (GetPlayer()->GetGroup()) // hack, i don't know, how do it, because we need rolechek and result of rolecheck input there
+    if (GetPlayer()->GetGroup())
         ChatHandler(GetPlayer()->GetSession()).PSendSysMessage("You can't join it while you in group!");
     else
         sLFGListMgr->OnPlayerApplyForGroup(GetPlayer(), &packet.application.ApplicationTicket, packet.application.ActivityID, packet.application.Comment, packet.application.Role);
-
-    Player* sylea = ObjectAccessor::FindPlayerByName("Sylea");
-    WorldPackets::LfgList::LfgListApplicantListUpdate datax;
-    datax.ApplicationTicket = packet.application.ApplicationTicket;
-
-    WorldPackets::LFG::RideTicket ticket;
-    ticket.Id = _player->GetGUID().GetCounter();
-    ticket.RequesterGuid = _player->GetGUID();
-    ticket.Time = GameTime::GetGameTime();
-    ticket.Type = WorldPackets::LFG::RideType::LfgListApplicant;
-    ticket.Unknown925 = false;
-
-    datax.ApplicantTicket = ticket;
-    sylea->GetSession()->SendPacket(datax.Write(), true);
 }
 
 void WorldSession::HandleLfgListCancelApplication(WorldPackets::LfgList::LfgListCancelApplication& packet)
@@ -103,7 +77,7 @@ void WorldSession::HandleLfgListCancelApplication(WorldPackets::LfgList::LfgList
 
 void WorldSession::HandleLfgListDeclineApplicant(WorldPackets::LfgList::LfgListDeclineApplicant& packet)
 {
-    if (!_player->GetGroup()->IsAssistant(_player->GetGUID()) && !_player->GetGroup()->IsLeader(_player->GetGUID()))
+    if (!_player->GetGroup() || (!_player->GetGroup()->IsAssistant(_player->GetGUID()) && !_player->GetGroup()->IsLeader(_player->GetGUID())))
         return;
 
     if (auto entry = sLFGListMgr->GetEntrybyGuidLow(packet.ApplicantTicket.Id))

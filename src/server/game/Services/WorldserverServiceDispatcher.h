@@ -31,6 +31,8 @@
 #include "connection_service.pb.h"
 #include "friends_service.pb.h"
 #include "WorldserverGameUtilitiesService.h"
+#include "WorldserverFriendsService.h"
+#include "WorldserverBnetStubServices.h"
 #include "presence_listener.pb.h"
 #include "presence_service.pb.h"
 #include "report_service.pb.h"

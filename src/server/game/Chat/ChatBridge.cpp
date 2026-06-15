@@ -27,8 +27,6 @@
 #include <cstdint>
 #include <charconv>
 #include <rapidjson/document.h>
-#include "Map.h"
-#include "Creature.h"
 
 static std::string extractJsonValue(const std::string& json, const std::string& key)
 {
@@ -112,7 +110,6 @@ void ChatBridge::ProcessIncoming()
 		std::string target = getString("target");
 		std::string channelName = getString("channel");
 		uint32_t guildId = getUInt32("guildId");
-
 
 		if (messageStr.empty())
 		{
@@ -229,7 +226,9 @@ void ChatBridge::Publish(const std::string& channel, const std::string& message)
 #endif
 }
 
-#if defined(USE_HIREDIS)
+#if !defined(USE_HIREDIS)
+void ChatBridge::StartSubscriber() {}
+#else
 void ChatBridge::StartSubscriber()
 {
 	m_subRunning = true;
@@ -247,40 +246,21 @@ void ChatBridge::StartSubscriber()
 
 			redisReply* reply = (redisReply*)redisCommand(c, "SUBSCRIBE %s", "chat:in");
 			if (reply) freeReplyObject(reply);
-		// also subscribe to cross-realm patterns (pmessage) to receive crossrealm whispers/trade and presence
-		redisReply* preply = (redisReply*)redisCommand(c, "PSUBSCRIBE %s %s %s", "crossrealm:whisper:*", "crossrealm:trade:*", "presence:realm:*");
-		if (preply) freeReplyObject(preply);
 			TC_LOG_INFO("network", "ChatBridge subscriber: subscribed to chat:in");
 			while (m_subRunning)
 			{
 				void* r = nullptr;
 				if (redisGetReply(c, &r) != REDIS_OK) break;
 				redisReply* rr = (redisReply*)r;
-				if (rr && rr->type == REDIS_REPLY_ARRAY)
+				if (rr && rr->type == REDIS_REPLY_ARRAY && rr->elements >= 3)
 				{
-					// Handle subscribe message: ["message", channel, message]
-					// Handle pmessage: ["pmessage", pattern, channel, message]
-					std::string kind = rr->element[0] && rr->element[0]->str ? rr->element[0]->str : std::string();
-					std::string channel;
-					std::string msg;
-					if (kind == "message" && rr->elements >= 3)
+					if (rr->element[2] && rr->element[2]->str)
 					{
-						if (rr->element[1] && rr->element[1]->str) channel = rr->element[1]->str;
-						if (rr->element[2] && rr->element[2]->str) msg = rr->element[2]->str;
-					}
-					else if (kind == "pmessage" && rr->elements >= 4)
-					{
-						if (rr->element[2] && rr->element[2]->str) channel = rr->element[2]->str;
-						if (rr->element[3] && rr->element[3]->str) msg = rr->element[3]->str;
-					}
-
-					if (!msg.empty())
-					{
-						TC_LOG_INFO("network", "ChatBridge received on %s: %s", channel.c_str(), msg.c_str());
-						// push raw JSON + channel to queue for main-thread parsing
+						std::string msg = rr->element[2]->str;
+						TC_LOG_INFO("network", "ChatBridge received: %s", msg.c_str());
+						// push raw JSON to queue for main-thread parsing
 						IncomingWebChat iw;
 						iw.rawJson = msg;
-						iw.channel = channel;
 						{ // push to queue for main thread to process
 							PushIncoming(std::move(iw));
 						}

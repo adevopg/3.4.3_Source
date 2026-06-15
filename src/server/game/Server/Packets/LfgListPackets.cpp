@@ -1,7 +1,4 @@
 #include "LfgListPackets.h"
-#include <fstream>// temp
-#include "ObjectAccessor.h" // temp
-#include "Group.h" //temp
 #include "LFGMgr.h"
 #include "GameTime.h"
 
@@ -322,24 +319,7 @@ WorldPacket const* WorldPackets::LfgList::LfgListSearchResults::Write()
 
             _worldPacket << int32(entry.GroupFinderActivityId);
 
-            std::ifstream fs;
-            fs.open("test.txt");
-
-            int32 num = 0;
-
-            if (fs.is_open())
-            {
-                std::string out;
-                while (std::getline(fs, out))
-                {
-                    num = std::stoi(out);
-                    break;
-                }
-            }
-
-            // This is very hard for me to do without reversing knowledge
-            // They bitshift the ilvl
-            _worldPacket << int32(num); // entry.RequiredItemLevel
+            _worldPacket << int32(entry.RequiredItemLevel);
 
             _worldPacket << int32(entry.RequiredHonorLevel);
 

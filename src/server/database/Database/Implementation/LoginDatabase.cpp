@@ -192,6 +192,19 @@ void LoginDatabaseConnection::DoPrepareStatements()
     PrepareStatement(LOGIN_INS_BATTLE_PAY_PURCHASE, "INSERT INTO battlepay_purchases (id, battlenetAccountId, realm, productID, productName, CurrentPrice, RemoteAddress, delivered) VALUES (?, ?, ?, ?, ?, ?, ?, ?);", CONNECTION_ASYNC);
     PrepareStatement(LOGIN_SEL_BATTLE_PAY_PURCHASES, "SELECT id, productID FROM battlepay_purchases WHERE battlenetAccountId = ? AND delivered != 1;", CONNECTION_SYNCH);
     PrepareStatement(LOGIN_UPD_BATTLE_PAY_CLAIM_ITEMS, "UPDATE battlepay_purchases SET delivered = 1 WHERE id = ?;", CONNECTION_ASYNC);
+
+    // BNet Friends
+    PrepareStatement(LOGIN_SEL_BNET_BATTLETAG, "SELECT battletag FROM battlenet_accounts WHERE id = ?", CONNECTION_SYNCH);
+    PrepareStatement(LOGIN_SEL_BNET_ACCOUNT_ID_BY_BATTLETAG, "SELECT id FROM battlenet_accounts WHERE battletag = ?", CONNECTION_SYNCH);
+    PrepareStatement(LOGIN_UPD_BNET_BATTLETAG, "UPDATE battlenet_accounts SET battletag = ? WHERE id = ?", CONNECTION_ASYNC);
+    PrepareStatement(LOGIN_SEL_BNET_FRIENDS, "SELECT IF(account1=?,account2,account1) AS friend_id FROM battlenet_friends WHERE account1=? OR account2=?", CONNECTION_SYNCH);
+    PrepareStatement(LOGIN_INS_BNET_FRIEND, "INSERT IGNORE INTO battlenet_friends (account1,account2,created) VALUES (LEAST(?,?),GREATEST(?,?),UNIX_TIMESTAMP())", CONNECTION_ASYNC);
+    PrepareStatement(LOGIN_DEL_BNET_FRIEND, "DELETE FROM battlenet_friends WHERE (account1=? AND account2=?) OR (account1=? AND account2=?)", CONNECTION_ASYNC);
+    PrepareStatement(LOGIN_SEL_BNET_INVITATIONS_RECEIVED, "SELECT id,inviter_id,inviter_battletag,invitee_battletag,created FROM battlenet_invitations WHERE invitee_id=?", CONNECTION_SYNCH);
+    PrepareStatement(LOGIN_SEL_BNET_INVITATIONS_SENT, "SELECT id,invitee_id,inviter_battletag,invitee_battletag,created FROM battlenet_invitations WHERE inviter_id=?", CONNECTION_SYNCH);
+    PrepareStatement(LOGIN_INS_BNET_INVITATION, "INSERT IGNORE INTO battlenet_invitations (inviter_id,invitee_id,inviter_battletag,invitee_battletag,created) VALUES (?,?,?,?,UNIX_TIMESTAMP())", CONNECTION_ASYNC);
+    PrepareStatement(LOGIN_DEL_BNET_INVITATION, "DELETE FROM battlenet_invitations WHERE id=?", CONNECTION_ASYNC);
+    PrepareStatement(LOGIN_SEL_BNET_INVITATION_BY_ID, "SELECT id,inviter_id,invitee_id,inviter_battletag,invitee_battletag FROM battlenet_invitations WHERE id=?", CONNECTION_SYNCH);
 }
 
 LoginDatabaseConnection::LoginDatabaseConnection(MySQLConnectionInfo& connInfo, ConnectionFlags connectionFlags) : MySQLConnection(connInfo, connectionFlags)

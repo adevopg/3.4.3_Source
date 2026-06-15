@@ -60,6 +60,7 @@
 #include "ScriptMgr.h"
 #include "SocialMgr.h"
 #include "StringConvert.h"
+#include "BattlenetPackets.h"
 #include "SystemPackets.h"
 #include "Util.h"
 #include "World.h"
@@ -355,7 +356,7 @@ void WorldSession::HandleCharEnum(CharacterDatabaseQueryHolder const& holder)
             if (std::vector<UF::ChrCustomizationChoice>* customizationsForChar = Trinity::Containers::MapGetValuePtr(customizations, charInfo.Guid.GetCounter()))
                 charInfo.Customizations = std::move(*customizationsForChar);
 
-            TC_LOG_ERROR("network", "Loading char guid {} from account {}.", charInfo.Guid.ToString(), GetAccountId());
+            TC_LOG_INFO("network", "Loading char guid {} from account {}.", charInfo.Guid.ToString(), GetAccountId());
 
             if (!charEnum.IsDeletedCharacters)
             {
@@ -1090,6 +1091,15 @@ void WorldSession::HandlePlayerLogin(LoginQueryHolder const& holder)
 
     SendFeatureSystemStatus();
 
+    // Re-establish Battle.net connection status in-game (client resets on world entry)
+    if (GetBattlenetAccountId())
+    {
+        WorldPackets::Battlenet::ConnectionStatus bnetStatus;
+        bnetStatus.State = 1;
+        bnetStatus.SuppressNotification = true;
+        SendPacket(bnetStatus.Write());
+    }
+
     // Send MOTD
     {
         for (std::string const& motdLine : sWorld->GetMotd())
@@ -1390,8 +1400,8 @@ void WorldSession::SendFeatureSystemStatus()
     features.CfgRealmID = 2;
     features.CfgRealmRecID = 0;
     features.TokenPollTimeSeconds = 300;
-    features.VoiceEnabled = false;
-    features.BrowserEnabled = false; // Has to be false, otherwise client will crash if "Customer Support" is opened
+    features.VoiceEnabled = sWorld->getBoolConfig(CONFIG_FEATURE_SYSTEM_VOICE_CHAT_ENABLED);
+    features.BrowserEnabled = sWorld->getBoolConfig(CONFIG_FEATURE_SYSTEM_CUSTOMER_SUPPORT_SYSTEM_BROWSER_ENABLED); // Has to be false, otherwise client will crash if "Customer Support" is opened
 
     features.EuropaTicketSystemStatus.emplace();
     features.EuropaTicketSystemStatus->ThrottleState.MaxTries = 10;
@@ -1413,6 +1423,13 @@ void WorldSession::SendFeatureSystemStatus()
     features.BpayStoreDisabledByParentalControls = false;
     features.BpayStoreProductDeliveryDelay = 180;
     features.IsMuted = !CanSpeak();
+
+    // Enable BNet social panel features
+    features.ClubsEnabled = true;
+    features.ClubsBattleNetClubTypeAllowed = true;
+    features.ClubsCharacterClubTypeAllowed = true;
+    features.ClubsPresenceUpdateEnabled = true;
+    features.ClubFinderEnabled = true;
 
     features.TextToSpeechFeatureEnabled = false;
 

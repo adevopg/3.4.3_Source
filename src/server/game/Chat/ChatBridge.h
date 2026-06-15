@@ -9,7 +9,6 @@
 #include <mutex>
 #include <condition_variable>
 #include <thread>
-#include <unordered_map>
 
 struct ChatMessage
 {
@@ -49,10 +48,6 @@ private:
 	std::queue<IncomingWebChat> m_incoming;
 	std::mutex m_incomingMutex;
 	std::condition_variable m_incomingCond;
-
-	// presence summons created for remote players: remoteGuid -> summoned creature GUID
-	std::unordered_map<std::string, ObjectGuid> m_presenceSummons;
-	std::mutex m_presenceMutex;
 	ChatBridge() = default;
 	~ChatBridge() = default;
 	ChatBridge(const ChatBridge&) = delete;
