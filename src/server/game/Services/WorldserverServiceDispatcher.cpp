@@ -19,17 +19,17 @@
 
 Battlenet::WorldserverServiceDispatcher::WorldserverServiceDispatcher()
 {
-    AddService<WorldserverService<account::v1::AccountService>>();
+    AddService<Services::AccountService>();
     AddService<WorldserverService<authentication::v1::AuthenticationService>>();
     AddService<Services::ClubMembershipService>();
-    AddService<WorldserverService<club::v1::ClubService>>();
+    AddService<Services::ClubService>();
     AddService<WorldserverService<connection::v1::ConnectionService>>();
     AddService<Services::FriendsService>();
     AddService<Services::GameUtilitiesService>();
     AddService<Services::PresenceService>();
     AddService<WorldserverService<report::v1::ReportService>>();
     AddService<WorldserverService<report::v2::ReportService>>();
-    AddService<WorldserverService<resources::v1::ResourcesService>>();
+    AddService<Services::ResourcesService>();
     AddService<Services::UserManagerService>();
 }
 

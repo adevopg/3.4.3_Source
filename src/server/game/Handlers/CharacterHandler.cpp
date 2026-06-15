@@ -1091,7 +1091,7 @@ void WorldSession::HandlePlayerLogin(LoginQueryHolder const& holder)
 
     SendFeatureSystemStatus();
 
-    // Re-establish Battle.net connection status in-game (client resets on world entry)
+    // Re-establish Battle.net connection status in-game (client resets on world entry).
     if (GetBattlenetAccountId())
     {
         WorldPackets::Battlenet::ConnectionStatus bnetStatus;
@@ -1429,6 +1429,8 @@ void WorldSession::SendFeatureSystemStatus()
     features.ClubsBattleNetClubTypeAllowed = true;
     features.ClubsCharacterClubTypeAllowed = true;
     features.ClubsPresenceUpdateEnabled = true;
+    features.ClubsPresenceUpdateTimer = 30000;
+    features.HiddenUIClubsPresenceUpdateTimer = 300000;
     features.ClubFinderEnabled = true;
 
     features.TextToSpeechFeatureEnabled = false;

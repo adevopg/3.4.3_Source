@@ -153,6 +153,7 @@ uint32 FriendsService::HandleSubscribe(
     std::function<void(ServiceBase*, uint32, ::google::protobuf::Message const*)>& /*continuation*/)
 {
     uint32 myBnetId = _session->GetBattlenetAccountId();
+    TC_LOG_INFO("network", "FriendsService::HandleSubscribe called for session %s bnetId=%u", _session->GetPlayerInfo().c_str(), myBnetId);
     if (!myBnetId)
         return ERROR_OK;
 

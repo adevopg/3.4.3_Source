@@ -590,6 +590,20 @@ io.on('connection', (socket) => {
 });
 
 // -----------------------------
+// TACT CDN stub
+// The WoW client calls ResourcesService::GetContentHandle which now returns
+// proto_url="http://212.227.187.160:3000/tact/". The client appends a product
+// path (e.g. /tact/BN/versions) and expects a TACT-format text response.
+// Returning the header with no data rows means "nothing to download" → 100%.
+// -----------------------------
+app.use('/tact', (req, res) => {
+  console.log('[TACT]', req.method, req.path, 'from', req.ip);
+  res.set('Content-Type', 'text/plain; charset=utf-8');
+  // Empty TACT versions/cdns table – header only, no data rows.
+  res.send('Region!STRING:0|BuildConfig!HEX:16|CDNConfig!HEX:16|KeyRing!HEX:16|BuildId!DEC:4|VersionsName!String:0|ProductConfig!HEX:16\n');
+});
+
+// -----------------------------
 // Global redis subscriptions
 // -----------------------------
 

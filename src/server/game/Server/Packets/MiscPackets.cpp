@@ -838,3 +838,12 @@ void WorldPackets::Misc::ShowTradeSkill::Read()
     _worldPacket >> SpellID;
     _worldPacket >> SkillLineID;
 }
+
+WorldPacket const* WorldPackets::Misc::StreamingMovies::Write()
+{
+    _worldPacket << uint16(MovieIDs.size());
+    for (uint16 movieID : MovieIDs)
+        _worldPacket << movieID;
+
+    return &_worldPacket;
+}

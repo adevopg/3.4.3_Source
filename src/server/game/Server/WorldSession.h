@@ -967,6 +967,7 @@ class TC_GAME_API WorldSession
         void SendAuthResponse(uint32 code, bool queued, uint32 queuePos = 0);
         void SendClientCacheVersion(uint32 version);
         void SendAvailableHotfixes();
+        void SendStreamingMovies();
 
         void InitializeSession();
         void InitializeSessionCallback(LoginDatabaseQueryHolder const& holder, CharacterDatabaseQueryHolder const& realmHolder);

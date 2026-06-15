@@ -1018,6 +1018,16 @@ namespace WorldPackets
             uint32 SkillLineID = 0;
         };
 
+        class StreamingMovies final : public ServerPacket
+        {
+        public:
+            StreamingMovies() : ServerPacket(SMSG_STREAMING_MOVIES) { }
+
+            WorldPacket const* Write() override;
+
+            std::vector<uint16> MovieIDs;
+        };
+
     }
 }
 

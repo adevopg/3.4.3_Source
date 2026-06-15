@@ -27,6 +27,7 @@
 #include "ObjectMgr.h"
 #include "RBAC.h"
 #include "Realm.h"
+#include "MiscPackets.h"
 #include "SystemPackets.h"
 #include "Timezone.h"
 #include "World.h"
@@ -87,6 +88,14 @@ void WorldSession::SendClientCacheVersion(uint32 version)
     cache.CacheVersion = version;
 
     SendPacket(cache.Write());
+}
+
+void WorldSession::SendStreamingMovies()
+{
+    // Send empty movie list so the client knows there is nothing to stream.
+    // Without this packet the client shows "Bandwidth: 0 Mbps / Download: 0% complete".
+    WorldPackets::Misc::StreamingMovies packet;
+    SendPacket(packet.Write());
 }
 
 void WorldSession::SendSetTimeZoneInformation()

@@ -1196,6 +1196,7 @@ void WorldSession::InitializeSessionCallback(LoginDatabaseQueryHolder const& hol
     SendFeatureSystemStatusGlueScreen();
     SendClientCacheVersion(sWorld->getIntConfig(CONFIG_CLIENTCACHE_VERSION));
     SendAvailableHotfixes();
+    SendStreamingMovies();
     SendAccountDataTimes(ObjectGuid::Empty, GLOBAL_CACHE_MASK);
     SendTutorialsData();
 
