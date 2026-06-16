@@ -6,12 +6,12 @@
 #include <chrono>
 #include <thread>
 #if defined(USE_HIREDIS)
+#pragma warning(push)
+#pragma warning(disable: 4200)
 #include <hiredis/hiredis.h>
 #include <hiredis/async.h>
 #include <hiredis/adapters/libevent.h>
-#endif
-#if defined(USE_HIREDIS)
-#include <hiredis/hiredis.h>
+#pragma warning(pop)
 #endif
 #include "World.h"
 #include "ChatPackets.h"
@@ -109,7 +109,7 @@ void ChatBridge::ProcessIncoming()
 		uint32_t fromAcc = getUInt32("fromAccount");
 		std::string target = getString("target");
 		std::string channelName = getString("channel");
-		uint32_t guildId = getUInt32("guildId");
+		(void)getUInt32("guildId");
 
 		if (messageStr.empty())
 		{

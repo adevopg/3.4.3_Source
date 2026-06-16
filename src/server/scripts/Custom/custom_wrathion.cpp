@@ -14,7 +14,7 @@ namespace
 
     static constexpr std::array<LoginSpells, 1> g_LoginSpells = { LoginSpells::JOYOUS_JOURNEYS };
 
-    void ApplyLoginSpells(Player* player, bool firstLogin)
+    void ApplyLoginSpells(Player* player, bool /*firstLogin*/)
     {
         for (LoginSpells spell : g_LoginSpells)
         {

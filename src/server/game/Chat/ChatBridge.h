@@ -2,7 +2,10 @@
 #pragma once
 
 #ifdef USE_HIREDIS
+#pragma warning(push)
+#pragma warning(disable: 4200)
 #include <hiredis/hiredis.h>
+#pragma warning(pop)
 #endif
 #include <string>
 #include <queue>

@@ -162,8 +162,6 @@ void WorldSession::HandleLfgListSearch(WorldPackets::LfgList::LfgListSearch& req
 
         for (auto const& member : group->GetMemberSlots())
         {
-            uint8 role = member.roles >= 2 ? std::log2(member.roles) - 1 : member.roles;
-
             WorldPackets::LfgList::LFGMemberResult memberResult;
             memberResult.Member = member.guid;
             memberResult.Level = member.level;

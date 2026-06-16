@@ -1392,10 +1392,6 @@ public:
         }
         uint32 bnetAccountId = (*result)[0].GetUInt32();
 
-        // Use INSERT ... ON DUPLICATE KEY UPDATE for just the session_limit_min column
-        LoginDatabasePreparedStatement* updStmt = LoginDatabase.GetPreparedStatement(LOGIN_UPD_PARENTAL_CONTROLS_ENABLED);
-        // Reuse ENABLED stmt isn't suitable here — execute a direct update if row exists, else insert default
-        // We'll leverage the schedule stmt with current values preserved by reading first
         LoginDatabasePreparedStatement* selStmt = LoginDatabase.GetPreparedStatement(LOGIN_SEL_PARENTAL_CONTROLS);
         selStmt->setUInt32(0, bnetAccountId);
         PreparedQueryResult pcResult = LoginDatabase.Query(selStmt);

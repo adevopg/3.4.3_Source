@@ -109,7 +109,6 @@ bool TactRESTService::StartNetwork(Trinity::Asio::IoContext& ioContext, std::str
             std::string buildId     = sConfigMgr->GetStringDefault("LoginREST.TactBuildId",     "");
             std::string version     = sConfigMgr->GetStringDefault("LoginREST.TactVersion",     "");
             std::string extAddr     = sConfigMgr->GetStringDefault("LoginREST.ExternalAddress", "127.0.0.1");
-            int32  tactPort         = sConfigMgr->GetIntDefault   ("LoginREST.TactPort",         1120);
 
             body = "Region!STRING:0|BuildConfig!HEX:16|CDNConfig!HEX:16|KeyRing!HEX:16|BuildId!DEC:4|VersionsName!String:0|ProductConfig!HEX:16\n";
             if (!buildConfig.empty())
@@ -146,7 +145,7 @@ bool TactRESTService::StartNetwork(Trinity::Asio::IoContext& ioContext, std::str
 
     // /tpr* — Static CASC file server (BuildConfig, CDNConfig, data archives, etc.).
     // Files are served from LoginREST.TactDataDir; URL /tpr/... maps to {dataDir}/tpr/...
-    RegisterHandler(boost::beast::http::verb::get, "/tpr*", [](std::shared_ptr<TactHttpSession> session, Trinity::Net::Http::RequestContext& context)
+    RegisterHandler(boost::beast::http::verb::get, "/tpr*", [](std::shared_ptr<TactHttpSession> /*session*/, Trinity::Net::Http::RequestContext& context)
         -> Trinity::Net::Http::RequestHandlerResult
     {
         using Trinity::Net::Http::ToStdStringView;
