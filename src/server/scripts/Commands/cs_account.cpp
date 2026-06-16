@@ -30,6 +30,7 @@ EndScriptData */
 #include "CryptoGenerics.h"
 #include "CryptoRandom.h"
 #include "DatabaseEnv.h"
+#include "GameTime.h"
 #include "IpAddress.h"
 #include "IPLocation.h"
 #include "Language.h"
@@ -69,6 +70,30 @@ public:
             { "map",      HandleAccountOnlineListWithMapFilterCommand,  LANG_COMMAND_ACC_ONLINELIST_HELP,       rbac::RBAC_PERM_COMMAND_ACCOUNT_ONLINE_LIST,        Console::Yes },
             { "zone",     HandleAccountOnlineListWithZoneFilterCommand, LANG_COMMAND_ACC_ONLINELIST_HELP,       rbac::RBAC_PERM_COMMAND_ACCOUNT_ONLINE_LIST,        Console::Yes },
         };
+        static ChatCommandTable accountGameTimeCommandTable =
+        {
+            { "set",    HandleAccountGameTimeSetCommand,    LANG_NOT_IMPLEMENTED, rbac::RBAC_PERM_COMMAND_ACCOUNT_SET_SECLEVEL, Console::Yes },
+            { "add",    HandleAccountGameTimeAddCommand,    LANG_NOT_IMPLEMENTED, rbac::RBAC_PERM_COMMAND_ACCOUNT_SET_SECLEVEL, Console::Yes },
+            { "info",   HandleAccountGameTimeInfoCommand,   LANG_NOT_IMPLEMENTED, rbac::RBAC_PERM_COMMAND_ACCOUNT_SET_SECLEVEL, Console::Yes },
+        };
+        static ChatCommandTable accountTrialCommandTable =
+        {
+            { "set",  HandleAccountTrialSetCommand,  LANG_NOT_IMPLEMENTED, rbac::RBAC_PERM_COMMAND_ACCOUNT_SET_SECLEVEL, Console::Yes },
+            { "info", HandleAccountTrialInfoCommand, LANG_NOT_IMPLEMENTED, rbac::RBAC_PERM_COMMAND_ACCOUNT_SET_SECLEVEL, Console::Yes },
+        };
+        static ChatCommandTable accountTournamentCommandTable =
+        {
+            { "set",  HandleAccountTournamentSetCommand,  LANG_NOT_IMPLEMENTED, rbac::RBAC_PERM_COMMAND_ACCOUNT_SET_SECLEVEL, Console::Yes },
+            { "info", HandleAccountTournamentInfoCommand, LANG_NOT_IMPLEMENTED, rbac::RBAC_PERM_COMMAND_ACCOUNT_SET_SECLEVEL, Console::Yes },
+        };
+        static ChatCommandTable accountParentalCommandTable =
+        {
+            { "on",       HandleAccountParentalOnCommand,       LANG_NOT_IMPLEMENTED, rbac::RBAC_PERM_COMMAND_ACCOUNT_SET_SECLEVEL, Console::Yes },
+            { "off",      HandleAccountParentalOffCommand,      LANG_NOT_IMPLEMENTED, rbac::RBAC_PERM_COMMAND_ACCOUNT_SET_SECLEVEL, Console::Yes },
+            { "schedule", HandleAccountParentalScheduleCommand, LANG_NOT_IMPLEMENTED, rbac::RBAC_PERM_COMMAND_ACCOUNT_SET_SECLEVEL, Console::Yes },
+            { "limit",    HandleAccountParentalLimitCommand,    LANG_NOT_IMPLEMENTED, rbac::RBAC_PERM_COMMAND_ACCOUNT_SET_SECLEVEL, Console::Yes },
+            { "info",     HandleAccountParentalInfoCommand,     LANG_NOT_IMPLEMENTED, rbac::RBAC_PERM_COMMAND_ACCOUNT_SET_SECLEVEL, Console::Yes },
+        };
         static ChatCommandTable accountCommandTable =
         {
             { "2fa setup",          HandleAccount2FASetupCommand,       LANG_COMMAND_ACC_2FA_SETUP_HELP,        rbac::RBAC_PERM_COMMAND_ACCOUNT_2FA_SETUP,          Console::No  },
@@ -77,6 +102,10 @@ public:
             { "create",             HandleAccountCreateCommand,         LANG_COMMAND_ACC_CREATE_HELP,           rbac::RBAC_PERM_COMMAND_ACCOUNT_CREATE,             Console::Yes },
             { "delete",             HandleAccountDeleteCommand,         LANG_COMMAND_ACC_DELETE_HELP,           rbac::RBAC_PERM_COMMAND_ACCOUNT_DELETE,             Console::Yes },
             { "email",              HandleAccountEmailCommand,          LANG_COMMAND_ACC_EMAIL_HELP,            rbac::RBAC_PERM_COMMAND_ACCOUNT_EMAIL,              Console::No  },
+            { "gametime",           accountGameTimeCommandTable },
+            { "trial",              accountTrialCommandTable },
+            { "tournament",         accountTournamentCommandTable },
+            { "parental",           accountParentalCommandTable },
             { "onlinelist",         accountOnlinelistCommandTable },
             { "lock country",       HandleAccountLockCountryCommand,    LANG_COMMAND_ACC_LOCK_COUNTRY_HELP,     rbac::RBAC_PERM_COMMAND_ACCOUNT_LOCK_COUNTRY,       Console::No  },
             { "lock ip",            HandleAccountLockIpCommand,         LANG_COMMAND_ACC_LOCK_IP_HELP,          rbac::RBAC_PERM_COMMAND_ACCOUNT_LOCK_IP,            Console::No  },
@@ -1016,6 +1045,434 @@ public:
                 return false;
         }
 
+        return true;
+    }
+
+    static bool HandleAccountGameTimeSetCommand(ChatHandler* handler, std::string const& email, uint32 days)
+    {
+        LoginDatabasePreparedStatement* stmt = LoginDatabase.GetPreparedStatement(LOGIN_SEL_BNET_ACCOUNT_ID_BY_EMAIL);
+        stmt->setString(0, email);
+        PreparedQueryResult result = LoginDatabase.Query(stmt);
+        if (!result)
+        {
+            handler->PSendSysMessage("BNet account '%s' not found.", email.c_str());
+            handler->SetSentErrorMessage(true);
+            return false;
+        }
+
+        uint32 bnetAccountId = (*result)[0].GetUInt32();
+        uint32 expiry = (days == 0) ? 0 : uint32(GameTime::GetGameTime()) + days * DAY;
+
+        LoginDatabasePreparedStatement* updStmt = LoginDatabase.GetPreparedStatement(LOGIN_UPD_BNET_GAME_TIME);
+        updStmt->setUInt32(0, expiry);
+        updStmt->setUInt32(1, bnetAccountId);
+        LoginDatabase.Execute(updStmt);
+
+        if (days == 0)
+            handler->PSendSysMessage("Game time for '%s' set to unlimited.", email.c_str());
+        else
+            handler->PSendSysMessage("Game time for '%s' set to %u day(s) from now.", email.c_str(), days);
+
+        return true;
+    }
+
+    static bool HandleAccountGameTimeAddCommand(ChatHandler* handler, std::string const& email, uint32 days)
+    {
+        LoginDatabasePreparedStatement* stmt = LoginDatabase.GetPreparedStatement(LOGIN_SEL_BNET_ACCOUNT_ID_BY_EMAIL);
+        stmt->setString(0, email);
+        PreparedQueryResult result = LoginDatabase.Query(stmt);
+        if (!result)
+        {
+            handler->PSendSysMessage("BNet account '%s' not found.", email.c_str());
+            handler->SetSentErrorMessage(true);
+            return false;
+        }
+
+        uint32 bnetAccountId = (*result)[0].GetUInt32();
+
+        LoginDatabasePreparedStatement* selStmt = LoginDatabase.GetPreparedStatement(LOGIN_SEL_BNET_GAME_TIME);
+        selStmt->setUInt32(0, bnetAccountId);
+        PreparedQueryResult timeResult = LoginDatabase.Query(selStmt);
+
+        uint32 currentExpiry = 0;
+        if (timeResult)
+            currentExpiry = (*timeResult)[0].GetUInt32();
+
+        uint32 base = (currentExpiry == 0 || currentExpiry < uint32(GameTime::GetGameTime()))
+                      ? uint32(GameTime::GetGameTime())
+                      : currentExpiry;
+
+        uint32 newExpiry = base + days * DAY;
+
+        LoginDatabasePreparedStatement* updStmt = LoginDatabase.GetPreparedStatement(LOGIN_UPD_BNET_GAME_TIME);
+        updStmt->setUInt32(0, newExpiry);
+        updStmt->setUInt32(1, bnetAccountId);
+        LoginDatabase.Execute(updStmt);
+
+        handler->PSendSysMessage("Added %u day(s) of game time to '%s'.", days, email.c_str());
+        return true;
+    }
+
+    static bool HandleAccountGameTimeInfoCommand(ChatHandler* handler, std::string const& email)
+    {
+        LoginDatabasePreparedStatement* stmt = LoginDatabase.GetPreparedStatement(LOGIN_SEL_BNET_ACCOUNT_ID_BY_EMAIL);
+        stmt->setString(0, email);
+        PreparedQueryResult result = LoginDatabase.Query(stmt);
+        if (!result)
+        {
+            handler->PSendSysMessage("BNet account '%s' not found.", email.c_str());
+            handler->SetSentErrorMessage(true);
+            return false;
+        }
+
+        uint32 bnetAccountId = (*result)[0].GetUInt32();
+
+        LoginDatabasePreparedStatement* selStmt = LoginDatabase.GetPreparedStatement(LOGIN_SEL_BNET_GAME_TIME);
+        selStmt->setUInt32(0, bnetAccountId);
+        PreparedQueryResult timeResult = LoginDatabase.Query(selStmt);
+
+        uint32 expiry = 0;
+        if (timeResult)
+            expiry = (*timeResult)[0].GetUInt32();
+
+        if (expiry == 0)
+        {
+            handler->PSendSysMessage("Game time for '%s': unlimited.", email.c_str());
+        }
+        else
+        {
+            time_t expiryTime = static_cast<time_t>(expiry);
+            char timeStr[64];
+            tm* tmInfo = localtime(&expiryTime);
+            strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", tmInfo);
+            if (expiry < uint32(GameTime::GetGameTime()))
+                handler->PSendSysMessage("Game time for '%s': EXPIRED (%s).", email.c_str(), timeStr);
+            else
+                handler->PSendSysMessage("Game time for '%s': active until %s.", email.c_str(), timeStr);
+        }
+        return true;
+    }
+
+    // .account trial set <email> <days>  — 0 days removes trial
+    static bool HandleAccountTrialSetCommand(ChatHandler* handler, std::string const& email, uint32 days)
+    {
+        LoginDatabasePreparedStatement* stmt = LoginDatabase.GetPreparedStatement(LOGIN_SEL_BNET_ACCOUNT_ID_BY_EMAIL);
+        stmt->setString(0, email);
+        PreparedQueryResult result = LoginDatabase.Query(stmt);
+        if (!result)
+        {
+            handler->PSendSysMessage("BNet account '%s' not found.", email.c_str());
+            handler->SetSentErrorMessage(true);
+            return false;
+        }
+        uint32 bnetAccountId = (*result)[0].GetUInt32();
+
+        uint32 expiry = 0;
+        if (days > 0)
+            expiry = uint32(GameTime::GetGameTime()) + days * 24 * 3600;
+
+        LoginDatabasePreparedStatement* updStmt = LoginDatabase.GetPreparedStatement(LOGIN_UPD_BNET_TRIAL);
+        updStmt->setUInt32(0, expiry);
+        updStmt->setUInt32(1, bnetAccountId);
+        LoginDatabase.Execute(updStmt);
+
+        if (expiry == 0)
+            handler->PSendSysMessage("Trial period removed for '%s'.", email.c_str());
+        else
+            handler->PSendSysMessage("Trial period set for '%s': %u days (expires in %u days).", email.c_str(), days, days);
+        return true;
+    }
+
+    static bool HandleAccountTrialInfoCommand(ChatHandler* handler, std::string const& email)
+    {
+        LoginDatabasePreparedStatement* stmt = LoginDatabase.GetPreparedStatement(LOGIN_SEL_BNET_ACCOUNT_ID_BY_EMAIL);
+        stmt->setString(0, email);
+        PreparedQueryResult result = LoginDatabase.Query(stmt);
+        if (!result)
+        {
+            handler->PSendSysMessage("BNet account '%s' not found.", email.c_str());
+            handler->SetSentErrorMessage(true);
+            return false;
+        }
+        uint32 bnetAccountId = (*result)[0].GetUInt32();
+
+        LoginDatabasePreparedStatement* selStmt = LoginDatabase.GetPreparedStatement(LOGIN_SEL_BNET_TRIAL);
+        selStmt->setUInt32(0, bnetAccountId);
+        PreparedQueryResult trialResult = LoginDatabase.Query(selStmt);
+
+        uint32 expiry = 0;
+        if (trialResult)
+            expiry = (*trialResult)[0].GetUInt32();
+
+        if (expiry == 0)
+        {
+            handler->PSendSysMessage("Trial account '%s': no trial configured.", email.c_str());
+        }
+        else
+        {
+            time_t expiryTime = static_cast<time_t>(expiry);
+            char timeStr[64];
+            tm* tmInfo = localtime(&expiryTime);
+            strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", tmInfo);
+            if (expiry < uint32(GameTime::GetGameTime()))
+                handler->PSendSysMessage("Trial account '%s': EXPIRED (%s).", email.c_str(), timeStr);
+            else
+                handler->PSendSysMessage("Trial account '%s': active until %s.", email.c_str(), timeStr);
+        }
+        return true;
+    }
+
+    // .account tournament set <email> <days>   — 0 days removes subscription; use 99999 for permanent
+    static bool HandleAccountTournamentSetCommand(ChatHandler* handler, std::string const& email, uint32 days)
+    {
+        LoginDatabasePreparedStatement* stmt = LoginDatabase.GetPreparedStatement(LOGIN_SEL_BNET_ACCOUNT_ID_BY_EMAIL);
+        stmt->setString(0, email);
+        PreparedQueryResult result = LoginDatabase.Query(stmt);
+        if (!result)
+        {
+            handler->PSendSysMessage("BNet account '%s' not found.", email.c_str());
+            handler->SetSentErrorMessage(true);
+            return false;
+        }
+        uint32 bnetAccountId = (*result)[0].GetUInt32();
+
+        uint32 expiry = 0;
+        if (days > 0)
+            expiry = uint32(GameTime::GetGameTime()) + days * 24 * 3600;
+
+        LoginDatabasePreparedStatement* updStmt = LoginDatabase.GetPreparedStatement(LOGIN_UPD_BNET_TOURNAMENT);
+        updStmt->setUInt32(0, expiry);
+        updStmt->setUInt32(1, bnetAccountId);
+        LoginDatabase.Execute(updStmt);
+
+        if (expiry == 0)
+            handler->PSendSysMessage("Tournament subscription removed for '%s'.", email.c_str());
+        else
+        {
+            time_t expiryTime = static_cast<time_t>(expiry);
+            char timeStr[64];
+            strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", localtime(&expiryTime));
+            handler->PSendSysMessage("Tournament subscription for '%s' set: %u days (expires %s).", email.c_str(), days, timeStr);
+        }
+        return true;
+    }
+
+    static bool HandleAccountTournamentInfoCommand(ChatHandler* handler, std::string const& email)
+    {
+        LoginDatabasePreparedStatement* stmt = LoginDatabase.GetPreparedStatement(LOGIN_SEL_BNET_ACCOUNT_ID_BY_EMAIL);
+        stmt->setString(0, email);
+        PreparedQueryResult result = LoginDatabase.Query(stmt);
+        if (!result)
+        {
+            handler->PSendSysMessage("BNet account '%s' not found.", email.c_str());
+            handler->SetSentErrorMessage(true);
+            return false;
+        }
+        uint32 bnetAccountId = (*result)[0].GetUInt32();
+
+        LoginDatabasePreparedStatement* selStmt = LoginDatabase.GetPreparedStatement(LOGIN_SEL_BNET_TOURNAMENT);
+        selStmt->setUInt32(0, bnetAccountId);
+        PreparedQueryResult tournResult = LoginDatabase.Query(selStmt);
+
+        uint32 expiry = 0;
+        if (tournResult)
+            expiry = (*tournResult)[0].GetUInt32();
+
+        if (expiry == 0)
+        {
+            handler->PSendSysMessage("Tournament subscription for '%s': none (no access).", email.c_str());
+        }
+        else
+        {
+            time_t expiryTime = static_cast<time_t>(expiry);
+            char timeStr[64];
+            strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", localtime(&expiryTime));
+            if (expiry < uint32(GameTime::GetGameTime()))
+                handler->PSendSysMessage("Tournament subscription for '%s': EXPIRED (%s).", email.c_str(), timeStr);
+            else
+                handler->PSendSysMessage("Tournament subscription for '%s': active until %s.", email.c_str(), timeStr);
+        }
+        return true;
+    }
+
+    static bool HandleAccountParentalOnCommand(ChatHandler* handler, std::string const& email)
+    {
+        LoginDatabasePreparedStatement* stmt = LoginDatabase.GetPreparedStatement(LOGIN_SEL_BNET_ACCOUNT_ID_BY_EMAIL);
+        stmt->setString(0, email);
+        PreparedQueryResult result = LoginDatabase.Query(stmt);
+        if (!result)
+        {
+            handler->PSendSysMessage("BNet account '%s' not found.", email.c_str());
+            handler->SetSentErrorMessage(true);
+            return false;
+        }
+        uint32 bnetAccountId = (*result)[0].GetUInt32();
+
+        LoginDatabasePreparedStatement* updStmt = LoginDatabase.GetPreparedStatement(LOGIN_UPD_PARENTAL_CONTROLS_ENABLED);
+        updStmt->setUInt32(0, bnetAccountId);
+        updStmt->setBool(1, true);
+        LoginDatabase.Execute(updStmt);
+
+        handler->PSendSysMessage("Parental controls enabled for '%s'.", email.c_str());
+        return true;
+    }
+
+    static bool HandleAccountParentalOffCommand(ChatHandler* handler, std::string const& email)
+    {
+        LoginDatabasePreparedStatement* stmt = LoginDatabase.GetPreparedStatement(LOGIN_SEL_BNET_ACCOUNT_ID_BY_EMAIL);
+        stmt->setString(0, email);
+        PreparedQueryResult result = LoginDatabase.Query(stmt);
+        if (!result)
+        {
+            handler->PSendSysMessage("BNet account '%s' not found.", email.c_str());
+            handler->SetSentErrorMessage(true);
+            return false;
+        }
+        uint32 bnetAccountId = (*result)[0].GetUInt32();
+
+        LoginDatabasePreparedStatement* updStmt = LoginDatabase.GetPreparedStatement(LOGIN_UPD_PARENTAL_CONTROLS_ENABLED);
+        updStmt->setUInt32(0, bnetAccountId);
+        updStmt->setBool(1, false);
+        LoginDatabase.Execute(updStmt);
+
+        handler->PSendSysMessage("Parental controls disabled for '%s'.", email.c_str());
+        return true;
+    }
+
+    // .account parental schedule <email> <start_hour:0-23> <end_hour:0-24>  (same for all 7 days)
+    static bool HandleAccountParentalScheduleCommand(ChatHandler* handler, std::string const& email, uint8 startHour, uint8 endHour)
+    {
+        if (startHour > 23 || endHour > 24)
+        {
+            handler->SendSysMessage("Usage: .account parental schedule <email> <start_hour 0-23> <end_hour 0-24> (end 24 = midnight, meaning all day).");
+            handler->SetSentErrorMessage(true);
+            return false;
+        }
+
+        LoginDatabasePreparedStatement* stmt = LoginDatabase.GetPreparedStatement(LOGIN_SEL_BNET_ACCOUNT_ID_BY_EMAIL);
+        stmt->setString(0, email);
+        PreparedQueryResult result = LoginDatabase.Query(stmt);
+        if (!result)
+        {
+            handler->PSendSysMessage("BNet account '%s' not found.", email.c_str());
+            handler->SetSentErrorMessage(true);
+            return false;
+        }
+        uint32 bnetAccountId = (*result)[0].GetUInt32();
+
+        uint16 startMin = uint16(startHour) * 60;
+        uint16 endMin   = uint16(endHour)   * 60;  // 1440 = unrestricted (full day)
+
+        LoginDatabasePreparedStatement* updStmt = LoginDatabase.GetPreparedStatement(LOGIN_UPD_PARENTAL_CONTROLS_SCHEDULE);
+        updStmt->setUInt32(0, bnetAccountId);
+        updStmt->setUInt16(1, 0);       // session_limit_min — unchanged; set via .account parental limit
+        updStmt->setUInt16(2,  startMin); updStmt->setUInt16(3,  endMin); // sun
+        updStmt->setUInt16(4,  startMin); updStmt->setUInt16(5,  endMin); // mon
+        updStmt->setUInt16(6,  startMin); updStmt->setUInt16(7,  endMin); // tue
+        updStmt->setUInt16(8,  startMin); updStmt->setUInt16(9,  endMin); // wed
+        updStmt->setUInt16(10, startMin); updStmt->setUInt16(11, endMin); // thu
+        updStmt->setUInt16(12, startMin); updStmt->setUInt16(13, endMin); // fri
+        updStmt->setUInt16(14, startMin); updStmt->setUInt16(15, endMin); // sat
+        LoginDatabase.Execute(updStmt);
+
+        handler->PSendSysMessage("Parental schedule for '%s' set to %u:00 - %u:00 every day.", email.c_str(), startHour, endHour);
+        return true;
+    }
+
+    static bool HandleAccountParentalLimitCommand(ChatHandler* handler, std::string const& email, uint32 minutes)
+    {
+        LoginDatabasePreparedStatement* stmt = LoginDatabase.GetPreparedStatement(LOGIN_SEL_BNET_ACCOUNT_ID_BY_EMAIL);
+        stmt->setString(0, email);
+        PreparedQueryResult result = LoginDatabase.Query(stmt);
+        if (!result)
+        {
+            handler->PSendSysMessage("BNet account '%s' not found.", email.c_str());
+            handler->SetSentErrorMessage(true);
+            return false;
+        }
+        uint32 bnetAccountId = (*result)[0].GetUInt32();
+
+        // Use INSERT ... ON DUPLICATE KEY UPDATE for just the session_limit_min column
+        LoginDatabasePreparedStatement* updStmt = LoginDatabase.GetPreparedStatement(LOGIN_UPD_PARENTAL_CONTROLS_ENABLED);
+        // Reuse ENABLED stmt isn't suitable here — execute a direct update if row exists, else insert default
+        // We'll leverage the schedule stmt with current values preserved by reading first
+        LoginDatabasePreparedStatement* selStmt = LoginDatabase.GetPreparedStatement(LOGIN_SEL_PARENTAL_CONTROLS);
+        selStmt->setUInt32(0, bnetAccountId);
+        PreparedQueryResult pcResult = LoginDatabase.Query(selStmt);
+
+        uint16 startMin[7] = {0, 0, 0, 0, 0, 0, 0};
+        uint16 endMin[7]   = {1440, 1440, 1440, 1440, 1440, 1440, 1440};
+        if (pcResult)
+        {
+            Field* fields = pcResult->Fetch();
+            for (int d = 0; d < 7; ++d)
+            {
+                startMin[d] = fields[2 + d * 2    ].GetUInt16();
+                endMin[d]   = fields[2 + d * 2 + 1].GetUInt16();
+            }
+        }
+
+        LoginDatabasePreparedStatement* schedStmt = LoginDatabase.GetPreparedStatement(LOGIN_UPD_PARENTAL_CONTROLS_SCHEDULE);
+        schedStmt->setUInt32(0, bnetAccountId);
+        schedStmt->setUInt16(1, uint16(minutes > 65535 ? 65535 : minutes));
+        for (int d = 0; d < 7; ++d)
+        {
+            schedStmt->setUInt16(2 + d * 2,     startMin[d]);
+            schedStmt->setUInt16(2 + d * 2 + 1, endMin[d]);
+        }
+        LoginDatabase.Execute(schedStmt);
+
+        if (minutes == 0)
+            handler->PSendSysMessage("Session length limit removed for '%s'.", email.c_str());
+        else
+            handler->PSendSysMessage("Session length limit for '%s' set to %u minutes.", email.c_str(), minutes);
+        return true;
+    }
+
+    static bool HandleAccountParentalInfoCommand(ChatHandler* handler, std::string const& email)
+    {
+        LoginDatabasePreparedStatement* stmt = LoginDatabase.GetPreparedStatement(LOGIN_SEL_BNET_ACCOUNT_ID_BY_EMAIL);
+        stmt->setString(0, email);
+        PreparedQueryResult result = LoginDatabase.Query(stmt);
+        if (!result)
+        {
+            handler->PSendSysMessage("BNet account '%s' not found.", email.c_str());
+            handler->SetSentErrorMessage(true);
+            return false;
+        }
+        uint32 bnetAccountId = (*result)[0].GetUInt32();
+
+        LoginDatabasePreparedStatement* selStmt = LoginDatabase.GetPreparedStatement(LOGIN_SEL_PARENTAL_CONTROLS);
+        selStmt->setUInt32(0, bnetAccountId);
+        PreparedQueryResult pcResult = LoginDatabase.Query(selStmt);
+
+        if (!pcResult)
+        {
+            handler->PSendSysMessage("Parental controls for '%s': not configured (disabled).", email.c_str());
+            return true;
+        }
+
+        Field* fields = pcResult->Fetch();
+        bool   enabled        = fields[0].GetBool();
+        uint16 sessionLimitMin = fields[1].GetUInt16();
+
+        static const char* dayNames[7] = { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" };
+
+        handler->PSendSysMessage("Parental controls for '%s': %s", email.c_str(), enabled ? "ENABLED" : "disabled");
+        handler->PSendSysMessage("  Session limit: %s",
+            sessionLimitMin == 0 ? "none" : Trinity::StringFormat("%u min", sessionLimitMin).c_str());
+
+        for (int d = 0; d < 7; ++d)
+        {
+            uint16 s = fields[2 + d * 2    ].GetUInt16();
+            uint16 e = fields[2 + d * 2 + 1].GetUInt16();
+            if (s == 0 && e == 1440)
+                handler->PSendSysMessage("  %s: unrestricted", dayNames[d]);
+            else if (s >= e)
+                handler->PSendSysMessage("  %s: blocked (no access)", dayNames[d]);
+            else
+                handler->PSendSysMessage("  %s: %02u:%02u - %02u:%02u", dayNames[d], s / 60, s % 60, e / 60, e % 60);
+        }
         return true;
     }
 };

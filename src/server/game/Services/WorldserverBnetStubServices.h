@@ -3,7 +3,9 @@
 
 #include "WorldserverService.h"
 #include "BattlenetRpcErrorCodes.h"
+#include "Configuration/Config.h"
 #include "Log.h"
+#include "StringFormat.h"
 #include "account_service.pb.h"
 #include "account_types.pb.h"
 #include "club_core.pb.h"
@@ -277,13 +279,19 @@ namespace Battlenet
                 TC_LOG_DEBUG("network", "ResourcesService::HandleGetContentHandle: program={} stream={} version={}",
                     request->program(), request->stream(), request->version());
 
-                // Point the client at our local TACT stub (chat_bridge /tact/).
+                // Point the client at our local TACT stub (/tact/ on the bnetserver REST port).
                 // The stub returns an empty versions list so the client considers
                 // the content up-to-date and shows 100% / N/A instead of 0%.
-                response->set_region(0x75730000u); // "us\0\0"
-                response->set_usage(0u);
-                response->set_hash(std::string(16, '\0'));
-                response->set_proto_url("http://212.227.187.160:3000/tact/");
+                // BnetServer.RestUrl in worldserver.conf must match LoginREST.ExternalAddress
+                // and LoginREST.Port in bnetserver.conf (e.g. "http://212.227.187.160:8081").
+                std::string restUrl = sConfigMgr->GetStringDefault("BnetServer.RestUrl", "");
+                if (!restUrl.empty())
+                {
+                    response->set_region(0x75730000u); // "us\0\0"
+                    response->set_usage(0u);
+                    response->set_hash(std::string(16, '\0'));
+                    response->set_proto_url(Trinity::StringFormat("{}/tact/", restUrl));
+                }
                 return ERROR_OK;
             }
         };

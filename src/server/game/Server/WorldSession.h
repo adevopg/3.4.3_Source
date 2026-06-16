@@ -984,6 +984,7 @@ class TC_GAME_API WorldSession
         std::string const& GetAccountName() const { return _accountName; }
         uint32 GetBattlenetAccountId() const { return _battlenetAccountId; }
         ObjectGuid GetBattlenetAccountGUID() const { return ObjectGuid::Create<HighGuid::BNetAccount>(GetBattlenetAccountId()); }
+        bool IsTrialAccount() const { return _isTrial; }
         Player* GetPlayer() const { return _player; }
         std::string const& GetPlayerName() const;
         std::string GetPlayerInfo() const;
@@ -1786,6 +1787,7 @@ class TC_GAME_API WorldSession
         void HandleQueryScenarioPOI(WorldPackets::Scenario::QueryScenarioPOI& queryScenarioPOI);
 
         void HandleRequestLatestSplashScreen(WorldPackets::Misc::RequestLatestSplashScreen& requestLatestSplashScreen);
+        void HandleGetRemainingGameTimeOpcode(WorldPackets::Null& null);
 
         void HandleSocialContractRequest(WorldPackets::Social::SocialContractRequest& socialContractRequest);
 
@@ -1907,6 +1909,16 @@ class TC_GAME_API WorldSession
         rbac::RBACData* _RBACData;
         uint32 expireTime;
         bool forceExit;
+
+        // Parental controls
+        time_t _parentalEndTime    = 0; // absolute timestamp when today's allowed window ends; 0 = no restriction
+        time_t _parentalSessionExp = 0; // absolute timestamp when session length limit expires; 0 = no limit
+        uint32 _parentalCheckTimer = 0; // ms accumulator for 1-minute check interval
+
+        // Trial account
+        bool   _isTrial        = false;
+        time_t _trialExpiry    = 0;
+        uint32 _trialCheckTimer = 0;
 
         std::unique_ptr<boost::circular_buffer<std::pair<int64, uint32>>> _timeSyncClockDeltaQueue; // first member: clockDelta. Second member: latency of the packet exchange that was used to compute that clockDelta.
         int64 _timeSyncClockDelta;

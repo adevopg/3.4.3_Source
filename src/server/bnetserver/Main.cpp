@@ -35,6 +35,7 @@
 #include "IpNetwork.h"
 #include "Locales.h"
 #include "LoginRESTService.h"
+#include "TactRESTService.h"
 #include "MySQLThreading.h"
 #include "OpenSSLCrypto.h"
 #include "ProcessPriority.h"
@@ -215,6 +216,17 @@ int main(int argc, char** argv)
     }
 
     std::shared_ptr<void> sLoginServiceHandle(nullptr, [](void*) { sLoginService.StopNetwork(); });
+
+    // Plain HTTP TACT CDN stub (no SSL) — WoW client uses this to check streaming content.
+    int32 tactPort = sConfigMgr->GetIntDefault("LoginREST.TactPort", 8082);
+    if (tactPort > 0 && tactPort <= 0xFFFF)
+    {
+        if (!sTactService.StartNetwork(*ioContext, httpBindIp, uint16(tactPort)))
+            TC_LOG_WARN("server.bnetserver", "Failed to initialize TACT service on port {} — streaming indicator will stay at 0%", tactPort);
+        else
+            TC_LOG_INFO("server.bnetserver", "TACT CDN stub listening on port {}", tactPort);
+    }
+    std::shared_ptr<void> sTactServiceHandle(nullptr, [tactPort](void*) { if (tactPort > 0 && tactPort <= 0xFFFF) sTactService.StopNetwork(); });
 
     // Start the listening port (acceptor) for auth connections
     int32 bnport = sConfigMgr->GetIntDefault("BattlenetPort", 1119);

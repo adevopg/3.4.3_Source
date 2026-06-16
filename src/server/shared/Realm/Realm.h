@@ -90,6 +90,7 @@ struct TC_SHARED_API Realm
     uint8 Timezone;
     AccountTypes AllowedSecurityLevel;
     float PopulationLevel;
+    bool Tournament = false;    // requires arena tournament subscription to enter
 
     void SetName(std::string name);
 

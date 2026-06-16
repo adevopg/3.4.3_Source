@@ -58,6 +58,13 @@ void WorldSession::SendPartyResult(PartyOperation operation, const std::string& 
 
 void WorldSession::HandlePartyInviteOpcode(WorldPackets::Party::PartyInviteClient& packet)
 {
+    // Trial accounts cannot invite others to a group
+    if (IsTrialAccount())
+    {
+        SendPartyResult(PARTY_OP_INVITE, packet.TargetName, ERR_INVITE_RESTRICTED);
+        return;
+    }
+
     Player* invitingPlayer = GetPlayer();
     Player* invitedPlayer = ObjectAccessor::FindPlayerByName(packet.TargetName);
 
@@ -187,6 +194,16 @@ void WorldSession::HandlePartyInviteOpcode(WorldPackets::Party::PartyInviteClien
 
 void WorldSession::HandlePartyInviteResponseOpcode(WorldPackets::Party::PartyInviteResponse& packet)
 {
+    // Trial accounts cannot join groups
+    if (IsTrialAccount() && packet.Accept)
+    {
+        Group* groupInvite = GetPlayer()->GetGroupInvite();
+        if (groupInvite)
+            groupInvite->RemoveInvite(GetPlayer());
+        SendNotification("Las cuentas de prueba no pueden unirse a grupos.");
+        return;
+    }
+
     Group* group = GetPlayer()->GetGroupInvite();
 
     if (!group)

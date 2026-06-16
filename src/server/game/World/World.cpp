@@ -1609,6 +1609,12 @@ void World::LoadConfigSettings(bool reload)
 	// Voice Chat Feature System
 	m_bool_configs[CONFIG_FEATURE_SYSTEM_VOICE_CHAT_ENABLED] = sConfigMgr->GetBoolDefault("FeatureSystem.VoiceChat.Enabled", false);
 
+    // Game Time subscription enforcement
+    m_bool_configs[CONFIG_GAME_TIME_REQUIRED] = sConfigMgr->GetBoolDefault("GameTime.Required", false);
+
+    // Arena Tournament realm
+    m_bool_configs[CONFIG_ARENA_TOURNAMENT_REALM] = sConfigMgr->GetBoolDefault("ArenaTournament.Realm", false);
+
     // Dungeon finder
     m_int_configs[CONFIG_LFG_OPTIONSMASK] = sConfigMgr->GetIntDefault("DungeonFinder.OptionsMask", 1);
 

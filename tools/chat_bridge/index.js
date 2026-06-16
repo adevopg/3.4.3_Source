@@ -597,10 +597,12 @@ io.on('connection', (socket) => {
 // Returning the header with no data rows means "nothing to download" → 100%.
 // -----------------------------
 app.use('/tact', (req, res) => {
-  console.log('[TACT]', req.method, req.path, 'from', req.ip);
-  res.set('Content-Type', 'text/plain; charset=utf-8');
-  // Empty TACT versions/cdns table – header only, no data rows.
-  res.send('Region!STRING:0|BuildConfig!HEX:16|CDNConfig!HEX:16|KeyRing!HEX:16|BuildId!DEC:4|VersionsName!String:0|ProductConfig!HEX:16\n');
+   console.log('[TACT]', req.method, req.path, 'from', req.ip);
+
+   console.log('[TACT] headers:', JSON.stringify(req.headers));
+  // Try 200 empty body — if the streaming bar changes, we know proto_url is correct
+  // and only the response body format is wrong.
+  res.status(200).end();
 });
 
 // -----------------------------

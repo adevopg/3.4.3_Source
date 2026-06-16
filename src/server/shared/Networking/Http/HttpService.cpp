@@ -49,21 +49,34 @@ RequestHandlerResult DispatcherService::HandleRequest(std::shared_ptr<AbstractSo
         return path;
     }();
 
+    auto findHandler = [](HttpMethodHandlerMap const& handlers, std::string_view requestPath) -> HttpMethodHandlerMap::mapped_type const*
+    {
+        // Exact match first
+        auto itr = handlers.find(requestPath);
+        if (itr != handlers.end())
+            return &itr->second;
+        // Prefix match: handler registered as "/prefix/*" catches any sub-path
+        for (auto const& [registeredPath, handler] : handlers)
+        {
+            if (registeredPath.size() > 1 && registeredPath.back() == '*')
+            {
+                std::string_view prefix(registeredPath.data(), registeredPath.size() - 1);
+                if (requestPath.starts_with(prefix))
+                    return &handler;
+            }
+        }
+        return nullptr;
+    };
+
     context.handler = [&]() -> HttpMethodHandlerMap::mapped_type const*
     {
         switch (context.request.method())
         {
             case boost::beast::http::verb::get:
             case boost::beast::http::verb::head:
-            {
-                auto itr = _getHandlers.find(path);
-                return itr != _getHandlers.end() ? &itr->second : nullptr;
-            }
+                return findHandler(_getHandlers, path);
             case boost::beast::http::verb::post:
-            {
-                auto itr = _postHandlers.find(path);
-                return itr != _postHandlers.end() ? &itr->second : nullptr;
-            }
+                return findHandler(_postHandlers, path);
             default:
                 break;
         }

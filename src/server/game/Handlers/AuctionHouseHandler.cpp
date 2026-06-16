@@ -36,6 +36,9 @@
 
 void WorldSession::HandleAuctionBrowseQuery(WorldPackets::AuctionHouse::AuctionBrowseQuery& browseQuery)
 {
+    if (IsTrialAccount())
+        return;
+
     AuctionThrottleResult throttle = sAuctionMgr->CheckThrottle(_player, browseQuery.TaintedBy.has_value());
     if (throttle.Throttled)
         return;
@@ -195,6 +198,12 @@ void WorldSession::HandleAuctionGetCommodityQuote(WorldPackets::AuctionHouse::Au
 
 void WorldSession::HandleAuctionHelloOpcode(WorldPackets::AuctionHouse::AuctionHelloRequest& hello)
 {
+    if (IsTrialAccount())
+    {
+        SendNotification("Las cuentas de prueba no pueden acceder a la casa de subastas.");
+        return;
+    }
+
     Creature* unit = GetPlayer()->GetNPCIfCanInteractWith(hello.Guid, UNIT_NPC_FLAG_AUCTIONEER, UNIT_NPC_FLAG_2_NONE);
     if (!unit)
     {
@@ -802,6 +811,9 @@ void WorldSession::HandleAuctionSellCommodity(WorldPackets::AuctionHouse::Auctio
 
 void WorldSession::HandleAuctionSellItem(WorldPackets::AuctionHouse::AuctionSellItem& sellItem)
 {
+    if (IsTrialAccount())
+        return;
+
     AuctionThrottleResult throttle = sAuctionMgr->CheckThrottle(_player, sellItem.TaintedBy.has_value(), AuctionCommand::SellItem);
     if (throttle.Throttled)
         return;

@@ -27,7 +27,7 @@
 #include "club_membership_service.pb.h"
 #include "club_service.pb.h"
 #include "ConnectionService.h"
-#include "friends_service.pb.h"
+#include "FriendsService.h"
 #include "GameUtilitiesService.h"
 #include "presence_listener.pb.h"
 #include "presence_service.pb.h"

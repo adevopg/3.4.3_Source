@@ -24,7 +24,7 @@ Battlenet::ServiceDispatcher::ServiceDispatcher()
     AddService<Service<club::v1::membership::ClubMembershipService>>();
     AddService<Service<club::v1::ClubService>>();
     AddService<Services::Connection>();
-    AddService<Service<friends::v1::FriendsService>>();
+    AddService<Services::Friends>();
     AddService<Services::GameUtilities>();
     AddService<Service<presence::v1::PresenceService>>();
     AddService<Service<report::v1::ReportService>>();

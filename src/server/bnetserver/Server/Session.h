@@ -105,6 +105,7 @@ namespace Battlenet
             uint32 LoginTicketExpiry;
             bool IsBanned;
             bool IsPermanenetlyBanned;
+            uint32 TournamentExpiry;
 
             std::unordered_map<uint32, GameAccountInfo> GameAccounts;
         };

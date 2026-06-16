@@ -1080,6 +1080,18 @@ void WorldSession::HandlePlayerLogin(LoginQueryHolder const& holder)
     pCurrChar->GetMotionMaster()->Initialize();
     pCurrChar->SendDungeonDifficulty();
 
+    // Re-establish BNet connection before loginVerifyWorld.
+    // The client resets its BNet state when the player picks a character; we must
+    // set State=1 again so FeatureSystemStatus (sent after loginVerifyWorld) is
+    // evaluated while the client considers itself BNet-connected.
+    if (GetBattlenetAccountId())
+    {
+        WorldPackets::Battlenet::ConnectionStatus bnetStatus;
+        bnetStatus.State = 1;
+        bnetStatus.SuppressNotification = true;
+        SendPacket(bnetStatus.Write());
+    }
+
     WorldPackets::Character::LoginVerifyWorld loginVerifyWorld;
     loginVerifyWorld.MapID = pCurrChar->GetMapId();
     loginVerifyWorld.Pos = pCurrChar->GetPosition();
@@ -1090,15 +1102,6 @@ void WorldSession::HandlePlayerLogin(LoginQueryHolder const& holder)
     SendAccountDataTimes(playerGuid, ALL_ACCOUNT_DATA_CACHE_MASK);
 
     SendFeatureSystemStatus();
-
-    // Re-establish Battle.net connection status in-game (client resets on world entry).
-    if (GetBattlenetAccountId())
-    {
-        WorldPackets::Battlenet::ConnectionStatus bnetStatus;
-        bnetStatus.State = 1;
-        bnetStatus.SuppressNotification = true;
-        SendPacket(bnetStatus.Write());
-    }
 
     // Send MOTD
     {
@@ -1436,6 +1439,12 @@ void WorldSession::SendFeatureSystemStatus()
     features.TextToSpeechFeatureEnabled = false;
 
     SendPacket(features.Write());
+
+    // Tell the client that game time is active so it does not disconnect the player.
+    // SMSG_UPDATE_GAME_TIME_STATE: 0 = subscription OK / not paused.
+    WorldPacket gameTimeState(SMSG_UPDATE_GAME_TIME_STATE, 4);
+    gameTimeState << uint32(0);
+    SendPacket(&gameTimeState);
 }
 
 void WorldSession::HandleSetFactionAtWar(WorldPackets::Character::SetFactionAtWar& packet)

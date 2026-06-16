@@ -23,6 +23,7 @@
 #include "ChatPackets.h"
 #include "Common.h"
 #include "ChatBridge.h"
+#include "DatabaseEnv.h"
 #include "CreatureAI.h"
 #include "DB2Stores.h"
 #include "GameTime.h"
@@ -243,6 +244,23 @@ void WorldSession::HandleChatMessage(ChatMsg type, Language lang, std::string ms
     if (!ValidateHyperlinksAndMaybeKick(msg))
         return;
 
+    // Trial accounts: block public channels; whispers restricted to friends who have them added
+    if (IsTrialAccount())
+    {
+        if (type == CHAT_MSG_CHANNEL)
+        {
+            SendNotification("Las cuentas de prueba no pueden usar canales de chat publicos.");
+            return;
+        }
+        // Block all general/trade/LFG channel equivalent types
+        if (type != CHAT_MSG_SAY && type != CHAT_MSG_YELL && type != CHAT_MSG_EMOTE &&
+            type != CHAT_MSG_WHISPER && type != CHAT_MSG_AFK && type != CHAT_MSG_DND)
+        {
+            SendNotification("Las cuentas de prueba tienen chat restringido.");
+            return;
+        }
+    }
+
     switch (type)
     {
         case CHAT_MSG_SAY:
@@ -359,6 +377,28 @@ void WorldSession::HandleChatMessage(ChatMsg type, Language lang, std::string ms
             if (receiver->GetLevel() < sWorld->getIntConfig(CONFIG_CHAT_WHISPER_LEVEL_REQ) ||
                 (HasPermission(rbac::RBAC_PERM_CAN_FILTER_WHISPERS) && !sender->isAcceptWhispers() && !sender->IsInWhisperWhiteList(receiver->GetGUID())))
                 sender->AddWhisperWhiteList(receiver->GetGUID());
+
+            // Trial account: can only whisper players who have added them as a BNet friend
+            if (IsTrialAccount() && GetBattlenetAccountId())
+            {
+                uint32 receiverBnetId = receiver->GetSession() ? receiver->GetSession()->GetBattlenetAccountId() : 0;
+                bool allowed = false;
+                if (receiverBnetId)
+                {
+                    LoginDatabasePreparedStatement* friendStmt = LoginDatabase.GetPreparedStatement(LOGIN_SEL_BNET_FRIEND_CHECK);
+                    friendStmt->setUInt32(0, receiverBnetId);
+                    friendStmt->setUInt32(1, GetBattlenetAccountId());
+                    friendStmt->setUInt32(2, receiverBnetId);
+                    friendStmt->setUInt32(3, GetBattlenetAccountId());
+                    PreparedQueryResult friendResult = LoginDatabase.Query(friendStmt);
+                    allowed = (friendResult != nullptr);
+                }
+                if (!allowed)
+                {
+                    SendNotification("Las cuentas de prueba solo pueden susurrar a jugadores que los tengan como amigos.");
+                    return;
+                }
+            }
 
             GetPlayer()->Whisper(msg, lang, receiver);
             // Publish whisper to bridge (sanitized)

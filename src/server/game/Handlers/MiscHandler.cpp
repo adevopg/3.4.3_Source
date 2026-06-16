@@ -1195,3 +1195,12 @@ void WorldSession::HandleRequestLatestSplashScreen(WorldPackets::Misc::RequestLa
     splashScreenShowLatest.UISplashScreenID =  0;
     SendPacket(splashScreenShowLatest.Write());
 }
+
+void WorldSession::HandleGetRemainingGameTimeOpcode(WorldPackets::Null& /*null*/)
+{
+    // Respond with "unlimited" game time (0 seconds remaining = no expiry limit).
+    // Pirate/private-server clients disconnect if this query is never answered.
+    WorldPacket data(SMSG_GET_REMAINING_GAME_TIME_RESPONSE, 4);
+    data << uint32(0); // 0 = no time limit
+    SendPacket(&data);
+}

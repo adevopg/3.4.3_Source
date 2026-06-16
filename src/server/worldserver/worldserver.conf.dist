@@ -70,6 +70,17 @@
 RealmID = 1
 
 #
+#    BnetServer.RestUrl
+#        Description: Base URL of the bnetserver REST service (LoginREST.ExternalAddress + LoginREST.Port).
+#                     Used to build the ContentHandle proto_url sent to clients so the streaming
+#                     download indicator shows correctly instead of "0 Mbps / 0%".
+#                     Leave empty to disable (clients will see 0%).
+#        Example:     "http://212.227.187.160:8082"
+#        Default:     ""
+
+BnetServer.RestUrl = ""
+
+#
 #    DataDir
 #        Description: Data directory setting.
 #        Important:   DataDir needs to be quoted, as the string might contain space characters.
@@ -3561,6 +3572,29 @@ GameObject.CheckInvalidPosition = 0
 #                     1  - (Enabled)
 
 EnableAELoot = 0
+
+#
+#    GameTime.Required
+#        Description: If enabled, players must have active game time (subscription) to log in.
+#                     Game time is stored per BNet account in the auth database.
+#                     Use the .account gametime commands to manage subscriptions.
+#                     0 = unlimited (no expiry); non-zero = UNIX timestamp of expiry date.
+#        Default:     0 - (Disabled, all players can log in regardless of game time)
+#                     1 - (Enabled, players without active game time receive a billing error)
+
+GameTime.Required = 0
+
+#
+#    ArenaTournament.Realm
+#        Description: Marks this worldserver as an Arena Tournament realm.
+#                     Players must have an active tournament subscription (set via .account tournament set).
+#                     Non-subscribers see tournament realms as locked in the realm list.
+#                     Also mark the realm in the auth DB: UPDATE realmlist SET tournament=1 WHERE id=<X>.
+#
+#        Default:     0 - (Normal realm)
+#                     1 - (Arena Tournament realm; tournament subscription required to enter)
+
+ArenaTournament.Realm = 0
 
 #
 ###################################################################################################

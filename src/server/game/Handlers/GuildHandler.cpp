@@ -62,6 +62,13 @@ void WorldSession::HandleGuildOfficerRemoveMember(WorldPackets::Guild::GuildOffi
 
 void WorldSession::HandleGuildAcceptInvite(WorldPackets::Guild::AcceptGuildInvite& /*invite*/)
 {
+    if (IsTrialAccount())
+    {
+        SendNotification("Las cuentas de prueba no pueden unirse a hermandades.");
+        GetPlayer()->SetGuildIdInvited(UI64LIT(0));
+        return;
+    }
+
     if (!GetPlayer()->GetGuildId())
         if (Guild* guild = sGuildMgr->GetGuildById(GetPlayer()->GetGuildIdInvited()))
             guild->HandleAcceptMember(this);

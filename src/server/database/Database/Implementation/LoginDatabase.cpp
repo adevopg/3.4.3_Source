@@ -23,7 +23,7 @@ void LoginDatabaseConnection::DoPrepareStatements()
     if (!m_reconnecting)
         m_stmts.resize(MAX_LOGINDATABASE_STATEMENTS);
 
-    PrepareStatement(LOGIN_SEL_REALMLIST, "SELECT id, name, address, localAddress, port, icon, flag, timezone, allowedSecurityLevel, population, gamebuild, Region, Battlegroup FROM realmlist WHERE flag <> 3 ORDER BY name", CONNECTION_SYNCH);
+    PrepareStatement(LOGIN_SEL_REALMLIST, "SELECT id, name, address, localAddress, port, icon, flag, timezone, allowedSecurityLevel, population, gamebuild, Region, Battlegroup, tournament FROM realmlist WHERE flag <> 3 ORDER BY name", CONNECTION_SYNCH);
     PrepareStatement(LOGIN_DEL_EXPIRED_IP_BANS, "DELETE FROM ip_banned WHERE unbandate<>bandate AND unbandate<=UNIX_TIMESTAMP()", CONNECTION_ASYNC);
     PrepareStatement(LOGIN_UPD_EXPIRED_ACCOUNT_BANS, "UPDATE account_banned SET active = 0 WHERE active = 1 AND unbandate<>bandate AND unbandate<=UNIX_TIMESTAMP()", CONNECTION_ASYNC);
     PrepareStatement(LOGIN_SEL_IP_INFO, "SELECT unbandate > UNIX_TIMESTAMP() OR unbandate = bandate AS banned, NULL as country FROM ip_banned WHERE ip = ?", CONNECTION_ASYNC);
@@ -117,7 +117,7 @@ void LoginDatabaseConnection::DoPrepareStatements()
     PrepareStatement(LOGIN_SEL_ACCOUNT_TOTP_SECRET, "SELECT totp_secret FROM account WHERE id = ?", CONNECTION_SYNCH);
     PrepareStatement(LOGIN_UPD_ACCOUNT_TOTP_SECRET, "UPDATE account SET totp_secret = ? WHERE id = ?", CONNECTION_ASYNC);
 
-#define BnetAccountInfo "ba.id, UPPER(ba.email), ba.locked, ba.lock_country, ba.last_ip, ba.LoginTicketExpiry, bab.unbandate > UNIX_TIMESTAMP() OR bab.unbandate = bab.bandate, bab.unbandate = bab.bandate"
+#define BnetAccountInfo "ba.id, UPPER(ba.email), ba.locked, ba.lock_country, ba.last_ip, ba.LoginTicketExpiry, bab.unbandate > UNIX_TIMESTAMP() OR bab.unbandate = bab.bandate, bab.unbandate = bab.bandate, ba.tournament_expiry"
 #define BnetGameAccountInfo "a.id, a.username, ab.unbandate, ab.unbandate = ab.bandate, aa.SecurityLevel"
 
     PrepareStatement(LOGIN_SEL_BNET_AUTHENTICATION, "SELECT ba.id, ba.srp_version, COALESCE(ba.salt, 0x0000000000000000000000000000000000000000000000000000000000000000), ba.verifier, ba.failed_logins, ba.LoginTicket, ba.LoginTicketExpiry, bab.unbandate > UNIX_TIMESTAMP() OR bab.unbandate = bab.bandate FROM battlenet_accounts ba LEFT JOIN battlenet_account_bans bab ON ba.id = bab.id WHERE email = ?", CONNECTION_ASYNC);
@@ -197,7 +197,7 @@ void LoginDatabaseConnection::DoPrepareStatements()
     PrepareStatement(LOGIN_SEL_BNET_BATTLETAG, "SELECT battletag FROM battlenet_accounts WHERE id = ?", CONNECTION_SYNCH);
     PrepareStatement(LOGIN_SEL_BNET_ACCOUNT_ID_BY_BATTLETAG, "SELECT id FROM battlenet_accounts WHERE battletag = ?", CONNECTION_SYNCH);
     PrepareStatement(LOGIN_UPD_BNET_BATTLETAG, "UPDATE battlenet_accounts SET battletag = ? WHERE id = ?", CONNECTION_ASYNC);
-    PrepareStatement(LOGIN_SEL_BNET_FRIENDS, "SELECT IF(account1=?,account2,account1) AS friend_id FROM battlenet_friends WHERE account1=? OR account2=?", CONNECTION_SYNCH);
+    PrepareStatement(LOGIN_SEL_BNET_FRIENDS, "SELECT IF(account1=?,account2,account1) AS friend_id, created FROM battlenet_friends WHERE account1=? OR account2=?", CONNECTION_SYNCH);
     PrepareStatement(LOGIN_INS_BNET_FRIEND, "INSERT IGNORE INTO battlenet_friends (account1,account2,created) VALUES (LEAST(?,?),GREATEST(?,?),UNIX_TIMESTAMP())", CONNECTION_ASYNC);
     PrepareStatement(LOGIN_DEL_BNET_FRIEND, "DELETE FROM battlenet_friends WHERE (account1=? AND account2=?) OR (account1=? AND account2=?)", CONNECTION_ASYNC);
     PrepareStatement(LOGIN_SEL_BNET_INVITATIONS_RECEIVED, "SELECT id,inviter_id,inviter_battletag,invitee_battletag,created FROM battlenet_invitations WHERE invitee_id=?", CONNECTION_SYNCH);
@@ -205,6 +205,58 @@ void LoginDatabaseConnection::DoPrepareStatements()
     PrepareStatement(LOGIN_INS_BNET_INVITATION, "INSERT IGNORE INTO battlenet_invitations (inviter_id,invitee_id,inviter_battletag,invitee_battletag,created) VALUES (?,?,?,?,UNIX_TIMESTAMP())", CONNECTION_ASYNC);
     PrepareStatement(LOGIN_DEL_BNET_INVITATION, "DELETE FROM battlenet_invitations WHERE id=?", CONNECTION_ASYNC);
     PrepareStatement(LOGIN_SEL_BNET_INVITATION_BY_ID, "SELECT id,inviter_id,invitee_id,inviter_battletag,invitee_battletag FROM battlenet_invitations WHERE id=?", CONNECTION_SYNCH);
+
+    // Game Time — CONNECTION_BOTH: used in AccountInfoQueryHolder (async) and cs_account.cpp direct Query (sync)
+    PrepareStatement(LOGIN_SEL_BNET_GAME_TIME, "SELECT game_time_expiry FROM battlenet_accounts WHERE id = ?", CONNECTION_BOTH);
+    PrepareStatement(LOGIN_UPD_BNET_GAME_TIME, "UPDATE battlenet_accounts SET game_time_expiry = ? WHERE id = ?", CONNECTION_ASYNC);
+
+    // Parental Controls — CONNECTION_BOTH: used in AccountInfoQueryHolder (async) and cs_account.cpp direct Query (sync)
+    PrepareStatement(LOGIN_SEL_PARENTAL_CONTROLS,
+        "SELECT enabled, session_limit_min, "
+        "sun_start, sun_end, mon_start, mon_end, tue_start, tue_end, "
+        "wed_start, wed_end, thu_start, thu_end, fri_start, fri_end, sat_start, sat_end "
+        "FROM battlenet_parental_controls WHERE battlenet_account_id = ?",
+        CONNECTION_BOTH);
+    PrepareStatement(LOGIN_UPD_PARENTAL_CONTROLS_ENABLED,
+        "INSERT INTO battlenet_parental_controls (battlenet_account_id, enabled) VALUES (?, ?) "
+        "ON DUPLICATE KEY UPDATE enabled = VALUES(enabled)",
+        CONNECTION_ASYNC);
+    PrepareStatement(LOGIN_UPD_PARENTAL_CONTROLS_SCHEDULE,
+        "INSERT INTO battlenet_parental_controls "
+        "(battlenet_account_id, session_limit_min, "
+        "sun_start, sun_end, mon_start, mon_end, tue_start, tue_end, "
+        "wed_start, wed_end, thu_start, thu_end, fri_start, fri_end, sat_start, sat_end) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+        "ON DUPLICATE KEY UPDATE "
+        "session_limit_min=VALUES(session_limit_min), "
+        "sun_start=VALUES(sun_start), sun_end=VALUES(sun_end), "
+        "mon_start=VALUES(mon_start), mon_end=VALUES(mon_end), "
+        "tue_start=VALUES(tue_start), tue_end=VALUES(tue_end), "
+        "wed_start=VALUES(wed_start), wed_end=VALUES(wed_end), "
+        "thu_start=VALUES(thu_start), thu_end=VALUES(thu_end), "
+        "fri_start=VALUES(fri_start), fri_end=VALUES(fri_end), "
+        "sat_start=VALUES(sat_start), sat_end=VALUES(sat_end)",
+        CONNECTION_ASYNC);
+
+    // Arena Tournament subscription — CONNECTION_BOTH: used in AccountInfoQueryHolder (async) and cs_account.cpp direct Query (sync)
+    PrepareStatement(LOGIN_SEL_BNET_TOURNAMENT,
+        "SELECT tournament_expiry FROM battlenet_accounts WHERE id = ?",
+        CONNECTION_BOTH);
+    PrepareStatement(LOGIN_UPD_BNET_TOURNAMENT,
+        "UPDATE battlenet_accounts SET tournament_expiry = ? WHERE id = ?",
+        CONNECTION_ASYNC);
+
+    // Trial Account — CONNECTION_BOTH: used in AccountInfoQueryHolder (async) and cs_account.cpp direct Query (sync)
+    PrepareStatement(LOGIN_SEL_BNET_TRIAL,
+        "SELECT trial_expiry FROM battlenet_accounts WHERE id = ?",
+        CONNECTION_BOTH);
+    PrepareStatement(LOGIN_UPD_BNET_TRIAL,
+        "UPDATE battlenet_accounts SET trial_expiry = ? WHERE id = ?",
+        CONNECTION_ASYNC);
+    // Friend check only used via direct LoginDatabase.Query() — SYNCH is sufficient
+    PrepareStatement(LOGIN_SEL_BNET_FRIEND_CHECK,
+        "SELECT 1 FROM battlenet_friends WHERE account1 = LEAST(?,?) AND account2 = GREATEST(?,?)",
+        CONNECTION_SYNCH);
 }
 
 LoginDatabaseConnection::LoginDatabaseConnection(MySQLConnectionInfo& connInfo, ConnectionFlags connectionFlags) : MySQLConnection(connInfo, connectionFlags)

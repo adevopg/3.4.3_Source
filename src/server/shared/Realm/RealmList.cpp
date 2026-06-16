@@ -167,11 +167,14 @@ void RealmList::UpdateRealms()
                 uint32 build = fields[10].GetUInt32();
                 uint8 region = fields[11].GetUInt8();
                 uint8 battlegroup = fields[12].GetUInt8();
+                bool tournament = fields[13].GetBool();
 
                 Battlenet::RealmHandle id{ region, battlegroup, realmId };
 
                 UpdateRealm(newRealms[id], id, build, name, externalAddress->address(), localAddress->address(), port, icon,
                     flag, timezone, (allowedSecurityLevel <= SEC_ADMINISTRATOR ? AccountTypes(allowedSecurityLevel) : SEC_ADMINISTRATOR), pop);
+
+                newRealms[id].Tournament = tournament;
 
                 newSubRegions.insert(Battlenet::RealmHandle{ region, battlegroup, 0 }.GetAddressString());
 
@@ -311,7 +314,7 @@ std::vector<uint8> RealmList::GetRealmEntryJSON(Battlenet::RealmHandle const& id
     return compressed;
 }
 
-std::vector<uint8> RealmList::GetRealmList(uint32 build, std::string const& subRegion) const
+std::vector<uint8> RealmList::GetRealmList(uint32 build, std::string const& subRegion, bool hasTournamentSub /*= true*/) const
 {
     JSON::RealmList::RealmListUpdates realmList;
     {
@@ -324,6 +327,9 @@ std::vector<uint8> RealmList::GetRealmList(uint32 build, std::string const& subR
             uint32 flag = realm.second.Flags;
             if (realm.second.Build != build)
                 flag |= REALM_FLAG_VERSION_MISMATCH;
+            // Mark tournament realms as offline/locked for accounts without a tournament subscription
+            if (realm.second.Tournament && !hasTournamentSub)
+                flag |= REALM_FLAG_OFFLINE;
 
             JSON::RealmList::RealmState* state = realmList.add_updates();
             state->mutable_update()->set_wowrealmaddress(realm.second.Id.GetAddress());

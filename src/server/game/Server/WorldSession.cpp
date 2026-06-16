@@ -23,6 +23,7 @@
 #include "QueryHolder.h"
 #include "AccountMgr.h"
 #include "AuthenticationPackets.h"
+#include "BattlenetRpcErrorCodes.h"
 #include "BattlePetMgr.h"
 #include "BattlegroundMgr.h"
 #include "BattlenetPackets.h"
@@ -346,6 +347,38 @@ bool WorldSession::Update(uint32 diff, PacketFilter& updater)
     std::vector<WorldPacket*> requeuePackets;
     uint32 processedPackets = 0;
     time_t currentTime = GameTime::GetGameTime();
+
+    // Parental controls: kick player when allowed window or session limit ends
+    if (_player && _player->IsInWorld() && (_parentalEndTime != 0 || _parentalSessionExp != 0))
+    {
+        _parentalCheckTimer += diff;
+        if (_parentalCheckTimer >= 60000u) // check every minute
+        {
+            _parentalCheckTimer = 0;
+            if ((_parentalEndTime != 0 && currentTime >= _parentalEndTime) ||
+                (_parentalSessionExp != 0 && currentTime >= _parentalSessionExp))
+            {
+                SendNotification("Control parental: tu tiempo de juego ha finalizado.");
+                KickPlayer("WorldSession::Update Parental control: time limit reached");
+            }
+        }
+    }
+
+    // Trial account: kick when trial period expires mid-session
+    if (_isTrial && _trialExpiry > 0 && _player && _player->IsInWorld())
+    {
+        _trialCheckTimer += diff;
+        if (_trialCheckTimer >= 60000u)
+        {
+            _trialCheckTimer = 0;
+            if (uint32(currentTime) >= uint32(_trialExpiry))
+            {
+                _isTrial = false;
+                SendNotification("Tu periodo de prueba de 7 dias ha finalizado. Adquiere tiempo de juego para continuar.");
+                KickPlayer("WorldSession::Update Trial account: trial period expired");
+            }
+        }
+    }
 
     constexpr uint32 MAX_PROCESSED_PACKETS_IN_SAME_WORLDSESSION_UPDATE = 100;
 
@@ -1087,6 +1120,10 @@ public:
         GLOBAL_REALM_CHARACTER_COUNTS,
         MOUNTS,
         ITEM_APPEARANCES,
+        BNET_GAME_TIME,
+        PARENTAL_CONTROLS,
+        BNET_TRIAL,
+        BNET_TOURNAMENT,
 
         MAX_QUERIES
     };
@@ -1125,6 +1162,25 @@ public:
         stmt = LoginDatabase.GetPreparedStatement(LOGIN_SEL_BNET_ITEM_APPEARANCES);
         stmt->setUInt32(0, battlenetAccountId);
         ok = SetPreparedQuery(ITEM_APPEARANCES, stmt) && ok;
+
+        if (battlenetAccountId)
+        {
+            stmt = LoginDatabase.GetPreparedStatement(LOGIN_SEL_BNET_GAME_TIME);
+            stmt->setUInt32(0, battlenetAccountId);
+            ok = SetPreparedQuery(BNET_GAME_TIME, stmt) && ok;
+
+            stmt = LoginDatabase.GetPreparedStatement(LOGIN_SEL_PARENTAL_CONTROLS);
+            stmt->setUInt32(0, battlenetAccountId);
+            ok = SetPreparedQuery(PARENTAL_CONTROLS, stmt) && ok;
+
+            stmt = LoginDatabase.GetPreparedStatement(LOGIN_SEL_BNET_TRIAL);
+            stmt->setUInt32(0, battlenetAccountId);
+            ok = SetPreparedQuery(BNET_TRIAL, stmt) && ok;
+
+            stmt = LoginDatabase.GetPreparedStatement(LOGIN_SEL_BNET_TOURNAMENT);
+            stmt->setUInt32(0, battlenetAccountId);
+            ok = SetPreparedQuery(BNET_TOURNAMENT, stmt) && ok;
+        }
 
         return ok;
     }
@@ -1177,6 +1233,102 @@ void WorldSession::InitializeSessionCallback(LoginDatabaseQueryHolder const& hol
     _collectionMgr->LoadAccountHeirlooms(holder.GetPreparedResult(AccountInfoQueryHolder::GLOBAL_ACCOUNT_HEIRLOOMS));
     _collectionMgr->LoadAccountMounts(holder.GetPreparedResult(AccountInfoQueryHolder::MOUNTS));
     _collectionMgr->LoadAccountItemAppearances(holder.GetPreparedResult(AccountInfoQueryHolder::ITEM_APPEARANCES));
+
+    // Trial account check: load trial status before the game-time gate so an
+    // active trial can bypass the subscription requirement.
+    if (GetBattlenetAccountId())
+    {
+        if (PreparedQueryResult trialResult = holder.GetPreparedResult(AccountInfoQueryHolder::BNET_TRIAL))
+        {
+            uint32 trialExp = (*trialResult)[0].GetUInt32();
+            if (trialExp > 0 && uint32(GameTime::GetGameTime()) < trialExp)
+            {
+                _isTrial     = true;
+                _trialExpiry = static_cast<time_t>(trialExp);
+            }
+        }
+    }
+
+    // Game time check — blocks before character list when subscription has expired.
+    // An active trial bypasses this gate.
+    if (sWorld->getBoolConfig(CONFIG_GAME_TIME_REQUIRED) && GetBattlenetAccountId() && !_isTrial)
+    {
+        if (PreparedQueryResult gameTimeResult = holder.GetPreparedResult(AccountInfoQueryHolder::BNET_GAME_TIME))
+        {
+            uint32 expiry = (*gameTimeResult)[0].GetUInt32();
+            if (expiry != 0 && expiry < uint32(GameTime::GetGameTime()))
+            {
+                SendAuthResponse(ERROR_GAME_ACCOUNT_NO_TIME, false);
+                KickPlayer("WorldSession::InitializeSessionCallback Game time expired");
+                return;
+            }
+        }
+    }
+
+    // Parental controls check — blocks login outside allowed schedule
+    if (GetBattlenetAccountId())
+    {
+        if (PreparedQueryResult pcResult = holder.GetPreparedResult(AccountInfoQueryHolder::PARENTAL_CONTROLS))
+        {
+            Field* fields = pcResult->Fetch();
+            bool pcEnabled = fields[0].GetBool();
+            if (pcEnabled)
+            {
+                time_t now = GameTime::GetGameTime();
+                tm lt = *localtime(&now);
+                int dayOfWeek   = lt.tm_wday; // 0=Sunday
+                uint32 minOfDay = lt.tm_hour * 60 + lt.tm_min;
+
+                // fields layout: [0]=enabled [1]=session_limit_min
+                //   [2+day*2]=start [3+day*2]=end  (days: 0=sun..6=sat)
+                uint32 startMin = fields[2 + dayOfWeek * 2    ].GetUInt16();
+                uint32 endMin   = fields[2 + dayOfWeek * 2 + 1].GetUInt16();
+
+                // start >= end means the day is completely blocked
+                bool blocked = (startMin >= endMin) ||
+                               (minOfDay < startMin) ||
+                               (endMin < 1440 && minOfDay >= endMin);
+
+                if (blocked)
+                {
+                    SendAuthResponse(ERROR_PARENTAL_CONTROL_RESTRICTION, false);
+                    KickPlayer("WorldSession::InitializeSessionCallback Parental control: outside allowed hours");
+                    return;
+                }
+
+                // Store absolute deadline for in-session periodic kick
+                if (endMin < 1440)
+                {
+                    tm deadline = lt;
+                    deadline.tm_hour = endMin / 60;
+                    deadline.tm_min  = endMin % 60;
+                    deadline.tm_sec  = 0;
+                    _parentalEndTime = mktime(&deadline);
+                }
+
+                uint32 sessionLimitMin = fields[1].GetUInt16();
+                if (sessionLimitMin > 0)
+                    _parentalSessionExp = now + time_t(sessionLimitMin) * 60;
+            }
+        }
+    }
+
+    // Arena Tournament realm subscription check
+    if (sWorld->getBoolConfig(CONFIG_ARENA_TOURNAMENT_REALM) && GetBattlenetAccountId())
+    {
+        uint32 tournExpiry = 0;
+        if (PreparedQueryResult tournResult = holder.GetPreparedResult(AccountInfoQueryHolder::BNET_TOURNAMENT))
+            tournExpiry = (*tournResult)[0].GetUInt32();
+
+        // tournExpiry == 0 means no subscription record; must have active subscription to enter
+        bool hasSubscription = (tournExpiry > 0) && (tournExpiry >= uint32(GameTime::GetGameTime()));
+        if (!hasSubscription)
+        {
+            SendAuthResponse(ERROR_GAME_ACCOUNT_NO_PLAN, false);
+            KickPlayer("WorldSession::InitializeSessionCallback Arena tournament subscription required");
+            return;
+        }
+    }
 
     if (!m_inQueue)
         SendAuthResponse(ERROR_OK, false);

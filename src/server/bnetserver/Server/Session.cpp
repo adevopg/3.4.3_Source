@@ -37,7 +37,7 @@
 
 void Battlenet::Session::AccountInfo::LoadResult(PreparedQueryResult result)
 {
-    // ba.id, ba.email, ba.locked, ba.lock_country, ba.last_ip, ba.LoginTicketExpiry, bab.unbandate > UNIX_TIMESTAMP() OR bab.unbandate = bab.bandate, bab.unbandate = bab.bandate FROM battlenet_accounts ba LEFT JOIN battlenet_account_bans bab WHERE email = ?
+    // ba.id, ba.email, ba.locked, ba.lock_country, ba.last_ip, ba.LoginTicketExpiry, bab.unbandate > UNIX_TIMESTAMP() OR bab.unbandate = bab.bandate, bab.unbandate = bab.bandate, ba.tournament_expiry FROM battlenet_accounts ba LEFT JOIN battlenet_account_bans bab WHERE email = ?
     Field* fields = result->Fetch();
     Id = fields[0].GetUInt32();
     Login = fields[1].GetString();
@@ -47,8 +47,9 @@ void Battlenet::Session::AccountInfo::LoadResult(PreparedQueryResult result)
     LoginTicketExpiry = fields[5].GetUInt32();
     IsBanned = fields[6].GetUInt64() != 0;
     IsPermanenetlyBanned = fields[7].GetUInt64() != 0;
+    TournamentExpiry = fields[8].GetUInt32();
 
-    static constexpr uint32 GameAccountFieldsOffset = 8;
+    static constexpr uint32 GameAccountFieldsOffset = 9;
 
     do
     {
@@ -661,7 +662,12 @@ uint32 Battlenet::Session::GetRealmList(std::unordered_map<std::string, Variant 
     if (Variant const* subRegion = GetParam(params, "Command_RealmListRequest_v1"))
         subRegionId = subRegion->string_value();
 
-    std::vector<uint8> compressed = sRealmList->GetRealmList(_build, subRegionId);
+    // Check arena tournament subscription — non-subscribers see tournament realms as locked
+    bool hasTournamentSub = _accountInfo &&
+        (_accountInfo->TournamentExpiry > 0) &&
+        (_accountInfo->TournamentExpiry >= uint32(time(nullptr)));
+
+    std::vector<uint8> compressed = sRealmList->GetRealmList(_build, subRegionId, hasTournamentSub);
 
     if (compressed.empty())
         return ERROR_UTIL_SERVER_FAILED_TO_SERIALIZE_RESPONSE;

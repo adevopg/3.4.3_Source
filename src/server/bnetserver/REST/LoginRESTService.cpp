@@ -73,6 +73,7 @@ bool LoginRESTService::StartNetwork(Trinity::Asio::IoContext& ioContext, std::st
         return HandlePostRefreshLoginTicket(std::move(session), context);
     });
 
+
     _bindIP = bindIp;
     _port = port;
 

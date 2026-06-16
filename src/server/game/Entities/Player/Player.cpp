@@ -2114,6 +2114,10 @@ void Player::GiveXP(uint32 xp, Unit* victim, float group_rate)
     if (HasPlayerFlag(PLAYER_FLAGS_NO_XP_GAIN))
         return;
 
+    // Trial accounts: XP is frozen at level 20 (bar stays at 100%, cannot level up)
+    if (GetSession() && GetSession()->IsTrialAccount() && GetLevel() >= 20)
+        return;
+
     if (victim && victim->GetTypeId() == TYPEID_UNIT && !victim->ToCreature()->hasLootRecipient())
         return;
 
@@ -23522,6 +23526,20 @@ bool Player::ModifyMoney(int64 amount, bool sendError /*= true*/)
         SetMoney(GetMoney() > uint64(-amount) ? GetMoney() + amount : 0);
     else
     {
+        // Trial accounts are capped at 10 gold (100,000 copper)
+        static constexpr uint64 TRIAL_GOLD_CAP = 100000u;
+        if (GetSession() && GetSession()->IsTrialAccount())
+        {
+            if (GetMoney() >= TRIAL_GOLD_CAP)
+            {
+                if (sendError)
+                    SendEquipError(EQUIP_ERR_TOO_MUCH_GOLD, nullptr, nullptr);
+                return false;
+            }
+            if (GetMoney() + static_cast<uint64>(amount) > TRIAL_GOLD_CAP)
+                amount = static_cast<int64>(TRIAL_GOLD_CAP - GetMoney());
+        }
+
         if (GetMoney() <= MAX_MONEY_AMOUNT - static_cast<uint64>(amount))
             SetMoney(GetMoney() + amount);
         else
@@ -23694,7 +23712,7 @@ void Player::SendInitialPacketsBeforeAddToMap()
     if (MapDifficultyEntry const* mapDifficulty = GetMap()->GetMapDifficulty())
         worldServerInfo.InstanceGroupSize = GetMap()->GetMapDifficulty()->MaxPlayers;
 
-    worldServerInfo.IsTournamentRealm = 0; /// @todo
+    worldServerInfo.IsTournamentRealm = sWorld->getBoolConfig(CONFIG_ARENA_TOURNAMENT_REALM) ? 1 : 0;
     // worldServerInfo.RestrictedAccountMaxLevel; /// @todo
     // worldServerInfo.RestrictedAccountMaxMoney; /// @todo
     worldServerInfo.DifficultyID = GetMap()->GetDifficultyID();
