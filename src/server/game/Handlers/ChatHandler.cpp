@@ -22,7 +22,7 @@
 #include "Chat.h"
 #include "ChatPackets.h"
 #include "Common.h"
-#include "ChatBridge.h"
+// ChatBridge removed — chat events go to auth.admin_chat_log (LogChatToDb)
 #include "DatabaseEnv.h"
 #include "CreatureAI.h"
 #include "DB2Stores.h"
@@ -44,6 +44,49 @@
 #include "Warden.h"
 #include "World.h"
 #include <algorithm>
+
+// ── Admin chat monitor log ─────────────────────────────────────────────────
+namespace
+{
+static std::string CL_Esc(std::string const& s)
+{
+    std::string r; r.reserve(s.size() + 8);
+    for (unsigned char c : s) {
+        if      (c == '\'') r += "\\'";
+        else if (c == '\\') r += "\\\\";
+        else if (c == '\0') r += "\\0";
+        else                r += char(c);
+    }
+    return r;
+}
+
+static std::string CL_Zone(Player* p)
+{
+    if (!p) return "";
+    if (AreaTableEntry const* a = sAreaTableStore.LookupEntry(p->GetZoneId()))
+        if (char const* n = a->AreaName[DEFAULT_LOCALE]) return n;
+    return std::to_string(p->GetZoneId());
+}
+
+static void LogChatToDb(
+    uint32 charGuid, std::string const& charName, uint8 charLevel, std::string const& charZone,
+    std::string const& chatType, std::string const& message,
+    uint32 targetGuid = 0, std::string const& targetName = "", std::string const& targetZone = "", uint8 targetLevel = 0,
+    uint32 guildId = 0, uint32 groupId = 0, std::string const& channelName = "")
+{
+    std::string sql =
+        "INSERT INTO auth.admin_chat_log"
+        " (char_guid,char_name,char_level,char_zone,chat_type,message,"
+        "  target_guid,target_name,target_zone,target_level,guild_id,group_id,channel_name)"
+        " VALUES (" + std::to_string(charGuid) + ",'" + CL_Esc(charName) + "'," +
+        std::to_string(charLevel) + ",'" + CL_Esc(charZone) + "','" + chatType + "','" +
+        CL_Esc(message) + "'," + std::to_string(targetGuid) + ",'" + CL_Esc(targetName) + "','" +
+        CL_Esc(targetZone) + "'," + std::to_string(targetLevel) + "," +
+        std::to_string(guildId) + "," + std::to_string(groupId) + ",'" + CL_Esc(channelName) + "')";
+    LoginDatabase.Execute(sql.c_str());
+}
+} // anon namespace
+// ──────────────────────────────────────────────────────────────────────────
 
 enum class ChatWhisperTargetStatus : uint8
 {
@@ -276,13 +319,10 @@ void WorldSession::HandleChatMessage(ChatMsg type, Language lang, std::string ms
             }
 
             sender->Say(msg, lang);
-            // Publish say to bridge
-            try
-            {
+            try {
                 std::string from = GetPlayer()->GetName(); if (from.size() > 32) from = from.substr(0,32);
                 std::string m = msg; if (m.size() > 1024) m = m.substr(0,1024);
-                std::string json = "{\"type\":\"say\",\"from\":\"" + from + "\",\"message\":\"" + m + "\"}";
-                ChatBridge::Instance().Publish("chat:in:say", json);
+                LogChatToDb(GetPlayer()->GetGUID().GetCounter(), from, GetPlayer()->GetLevel(), CL_Zone(GetPlayer()), "say", m);
             } catch (...) { }
             break;
         }
@@ -299,13 +339,10 @@ void WorldSession::HandleChatMessage(ChatMsg type, Language lang, std::string ms
             }
 
             sender->TextEmote(msg);
-            // Publish emote to bridge
-            try
-            {
+            try {
                 std::string from = GetPlayer()->GetName(); if (from.size() > 32) from = from.substr(0,32);
                 std::string m = msg; if (m.size() > 1024) m = m.substr(0,1024);
-                std::string json = "{\"type\":\"emote\",\"from\":\"" + from + "\",\"message\":\"" + m + "\"}";
-                ChatBridge::Instance().Publish("chat:in:emote", json);
+                LogChatToDb(GetPlayer()->GetGUID().GetCounter(), from, GetPlayer()->GetLevel(), CL_Zone(GetPlayer()), "emote", m);
             } catch (...) { }
             break;
         }
@@ -322,13 +359,10 @@ void WorldSession::HandleChatMessage(ChatMsg type, Language lang, std::string ms
             }
 
             sender->Yell(msg, lang);
-            // Publish yell to bridge
-            try
-            {
+            try {
                 std::string from = GetPlayer()->GetName(); if (from.size() > 32) from = from.substr(0,32);
                 std::string m = msg; if (m.size() > 1024) m = m.substr(0,1024);
-                std::string json = "{\"type\":\"yell\",\"from\":\"" + from + "\",\"message\":\"" + m + "\"}";
-                ChatBridge::Instance().Publish("chat:in:yell", json);
+                LogChatToDb(GetPlayer()->GetGUID().GetCounter(), from, GetPlayer()->GetLevel(), CL_Zone(GetPlayer()), "yell", m);
             } catch (...) { }
             break;
         }
@@ -344,7 +378,40 @@ void WorldSession::HandleChatMessage(ChatMsg type, Language lang, std::string ms
             }
 
             Player* receiver = ObjectAccessor::FindConnectedPlayerByName(extName.Name);
-            if (!receiver || (lang != LANG_ADDON && !receiver->isAcceptWhispers() && receiver->GetSession()->HasPermission(rbac::RBAC_PERM_CAN_FILTER_WHISPERS) && !receiver->IsInWhisperWhiteList(sender->GetGUID())))
+            if (!receiver)
+            {
+                // Target not in game — check if they exist as a character (may be web-connected)
+                std::string safeNm = CL_Esc(extName.Name);
+                if (auto tr = LoginDatabase.Query(("SELECT guid,name,level FROM characters.characters WHERE name='" + safeNm + "' LIMIT 1").c_str()))
+                {
+                    auto tf = tr->Fetch();
+                    uint32 tgtGuid    = tf[0].GetUInt32();
+                    std::string tgtNm = tf[1].GetString();
+                    uint8  tgtLvl     = tf[2].GetUInt8();
+                    try {
+                        std::string from  = GetPlayer()->GetName(); if (from.size() > 32) from = from.substr(0, 32);
+                        std::string m2    = msg; if (m2.size() > 1024) m2 = m2.substr(0, 1024);
+                        uint32 sGuid      = GetPlayer()->GetGUID().GetCounter();
+                        uint8  sLvl       = GetPlayer()->GetLevel();
+                        std::string sZone = CL_Zone(GetPlayer());
+                        LogChatToDb(sGuid, from, sLvl, sZone, "whisper_out", m2, tgtGuid, tgtNm, "", tgtLvl);
+                        LogChatToDb(tgtGuid, tgtNm, tgtLvl, "", "whisper_in",  m2, sGuid, from, sZone, sLvl);
+                    } catch (...) {}
+                    // Echo back as WHISPER_INFORM so sender sees "To [Name]: ..." in their whisper channel
+                    {
+                        WorldPackets::Chat::Chat inform;
+                        inform.Initialize(CHAT_MSG_WHISPER_INFORM, LANG_UNIVERSAL, nullptr, nullptr, msg);
+                        inform.SenderGUID = GetPlayer()->GetGUID();
+                        inform.TargetGUID = ObjectGuid::Create<HighGuid::Player>(tgtGuid);
+                        inform.TargetName = tgtNm;
+                        SendPacket(inform.Write());
+                    }
+                }
+                else
+                    SendChatPlayerNotfoundNotice(target);
+                return;
+            }
+            if (lang != LANG_ADDON && !receiver->isAcceptWhispers() && receiver->GetSession()->HasPermission(rbac::RBAC_PERM_CAN_FILTER_WHISPERS) && !receiver->IsInWhisperWhiteList(sender->GetGUID()))
             {
                 SendChatPlayerNotfoundNotice(target);
                 return;
@@ -401,15 +468,15 @@ void WorldSession::HandleChatMessage(ChatMsg type, Language lang, std::string ms
             }
 
             GetPlayer()->Whisper(msg, lang, receiver);
-            // Publish whisper to bridge (sanitized)
-            try
-            {
+            try {
                 std::string from = GetPlayer()->GetName(); if (from.size() > 32) from = from.substr(0,32);
-                std::string to = receiver->GetName(); if (to.size() > 32) to = to.substr(0,32);
+                std::string to   = receiver->GetName();   if (to.size()   > 32) to   = to.substr(0,32);
                 std::string m = msg; if (m.size() > 1024) m = m.substr(0,1024);
-                // publish to per-receiver channel so only intended receiver webs can subscribe
-                std::string json = "{\"type\":\"whisper\",\"from\":\"" + from + "\",\"to\":\"" + to + "\",\"fromGuid\":\"" + GetPlayer()->GetGUID().ToString() + "\",\"message\":\"" + m + "\"}";
-                ChatBridge::Instance().Publish(std::string("chat:in:whisper:") + receiver->GetGUID().ToString(), json);
+                std::string sZone = CL_Zone(GetPlayer()); std::string rZone = CL_Zone(receiver);
+                uint8 sLvl = GetPlayer()->GetLevel();     uint8 rLvl = receiver->GetLevel();
+                uint32 sGuid = GetPlayer()->GetGUID().GetCounter(); uint32 rGuid = receiver->GetGUID().GetCounter();
+                LogChatToDb(sGuid, from, sLvl, sZone, "whisper_out", m, rGuid, to,   rZone, rLvl);
+                LogChatToDb(rGuid, to,   rLvl, rZone, "whisper_in",  m, sGuid, from, sZone, sLvl);
             } catch (...) { }
             break;
         }
@@ -432,17 +499,12 @@ void WorldSession::HandleChatMessage(ChatMsg type, Language lang, std::string ms
             WorldPackets::Chat::Chat packet;
             packet.Initialize(ChatMsg(type), lang, sender, nullptr, msg);
             group->BroadcastPacket(packet.Write(), false, group->GetMemberGroup(GetPlayer()->GetGUID()));
-            // Publish party message to bridge
-            try
-            {
+            try {
                 std::string from = GetPlayer()->GetName(); if (from.size() > 32) from = from.substr(0,32);
                 std::string m = msg; if (m.size() > 1024) m = m.substr(0,1024);
                 if (group && group->IsMember(GetPlayer()->GetGUID()))
-                {
-                    uint32 gid = group->GetDbStoreId();
-                    std::string json = "{\"type\":\"party\",\"groupId\":" + std::to_string(gid) + ",\"from\":\"" + from + "\",\"message\":\"" + m + "\"}";
-                    ChatBridge::Instance().Publish(std::string("chat:in:party:") + std::to_string(gid), json);
-                }
+                    LogChatToDb(GetPlayer()->GetGUID().GetCounter(), from, GetPlayer()->GetLevel(), CL_Zone(GetPlayer()),
+                        "party", m, 0, "", "", 0, 0, group->GetDbStoreId());
             } catch (...) { }
             break;
         }
@@ -455,21 +517,12 @@ void WorldSession::HandleChatMessage(ChatMsg type, Language lang, std::string ms
                     sScriptMgr->OnPlayerChat(GetPlayer(), type, lang, msg, guild);
 
                     guild->BroadcastToGuild(this, false, msg, lang == LANG_ADDON ? LANG_ADDON : LANG_UNIVERSAL);
-                    // Publish to external bridge for web clients (json: {type: "guild", guildId, from, message})
-                    try
-                    {
-                        // sanitize and limit lengths
-                        std::string from = GetPlayer()->GetName();
-                        if (from.size() > 32) from = from.substr(0,32);
-                        std::string m = msg;
-                        if (m.size() > 1024) m = m.substr(0,1024);
-                        // build JSON and rely on ChatBridge escaping
-                        uint32 guildId = GetPlayer()->GetGuildId();
-                        std::string json = "{\"type\":\"guild\",\"guildId\":" + std::to_string(guildId) +
-                            ",\"from\":\"" + from + "\",\"message\":\"" + m + "\"}";
-                        ChatBridge::Instance().Publish(std::string("chat:in:guild:") + std::to_string(guildId), json);
-                    }
-                    catch (...) { }
+                    try {
+                        std::string from = GetPlayer()->GetName(); if (from.size() > 32) from = from.substr(0,32);
+                        std::string m = msg; if (m.size() > 1024) m = m.substr(0,1024);
+                        LogChatToDb(GetPlayer()->GetGUID().GetCounter(), from, GetPlayer()->GetLevel(), CL_Zone(GetPlayer()),
+                            "guild", m, 0, "", "", 0, static_cast<uint32>(GetPlayer()->GetGuildId()));
+                    } catch (...) { }
                 }
             }
             break;
@@ -483,15 +536,11 @@ void WorldSession::HandleChatMessage(ChatMsg type, Language lang, std::string ms
                     sScriptMgr->OnPlayerChat(GetPlayer(), type, lang, msg, guild);
 
                     guild->BroadcastToGuild(this, true, msg, lang == LANG_ADDON ? LANG_ADDON : LANG_UNIVERSAL);
-                    // Publish officer message to bridge
-                    try
-                    {
+                    try {
                         std::string from = GetPlayer()->GetName(); if (from.size() > 32) from = from.substr(0,32);
                         std::string m = msg; if (m.size() > 1024) m = m.substr(0,1024);
-                        uint32 guildId = GetPlayer()->GetGuildId();
-                        std::string json = "{\"type\":\"officer\",\"guildId\":" + std::to_string(guildId) +
-                            ",\"from\":\"" + from + "\",\"message\":\"" + m + "\"}";
-                        ChatBridge::Instance().Publish(std::string("chat:in:officer:") + std::to_string(guildId), json);
+                        LogChatToDb(GetPlayer()->GetGUID().GetCounter(), from, GetPlayer()->GetLevel(), CL_Zone(GetPlayer()),
+                            "officer", m, 0, "", "", 0, static_cast<uint32>(GetPlayer()->GetGuildId()));
                     } catch (...) { }
                 }
             }
@@ -511,17 +560,12 @@ void WorldSession::HandleChatMessage(ChatMsg type, Language lang, std::string ms
             WorldPackets::Chat::Chat packet;
             packet.Initialize(ChatMsg(type), lang, sender, nullptr, msg);
             group->BroadcastPacket(packet.Write(), false);
-            // Publish raid message to bridge
-            try
-            {
+            try {
                 std::string from = GetPlayer()->GetName(); if (from.size() > 32) from = from.substr(0,32);
                 std::string m = msg; if (m.size() > 1024) m = m.substr(0,1024);
                 if (group && group->IsMember(GetPlayer()->GetGUID()))
-                {
-                    uint32 gid = group->GetDbStoreId();
-                    std::string json = "{\"type\":\"raid\",\"groupId\":" + std::to_string(gid) + ",\"from\":\"" + from + "\",\"message\":\"" + m + "\"}";
-                    ChatBridge::Instance().Publish(std::string("chat:in:raid:") + std::to_string(gid), json);
-                }
+                    LogChatToDb(GetPlayer()->GetGUID().GetCounter(), from, GetPlayer()->GetLevel(), CL_Zone(GetPlayer()),
+                        "raid", m, 0, "", "", 0, 0, group->GetDbStoreId());
             } catch (...) { }
             break;
         }
@@ -537,17 +581,12 @@ void WorldSession::HandleChatMessage(ChatMsg type, Language lang, std::string ms
             //in battleground, raid warning is sent only to players in battleground - code is ok
             packet.Initialize(CHAT_MSG_RAID_WARNING, lang, sender, nullptr, msg);
             group->BroadcastPacket(packet.Write(), false);
-            // Publish raid warning to bridge
-            try
-            {
+            try {
                 std::string from = GetPlayer()->GetName(); if (from.size() > 32) from = from.substr(0,32);
                 std::string m = msg; if (m.size() > 1024) m = m.substr(0,1024);
                 if (group && group->IsMember(GetPlayer()->GetGUID()))
-                {
-                    uint32 gid = group->GetDbStoreId();
-                    std::string json = "{\"type\":\"raid_warning\",\"groupId\":" + std::to_string(gid) + ",\"from\":\"" + from + "\",\"message\":\"" + m + "\"}";
-                    ChatBridge::Instance().Publish(std::string("chat:in:raid_warning:") + std::to_string(gid), json);
-                }
+                    LogChatToDb(GetPlayer()->GetGUID().GetCounter(), from, GetPlayer()->GetLevel(), CL_Zone(GetPlayer()),
+                        "raid_warning", m, 0, "", "", 0, 0, group->GetDbStoreId());
             } catch (...) { }
             break;
         }
@@ -572,23 +611,7 @@ void WorldSession::HandleChatMessage(ChatMsg type, Language lang, std::string ms
                         return;
 
                 sScriptMgr->OnPlayerChat(sender, type, lang, msg, chn);
-                chn->Say(sender->GetGUID(), msg, lang);
-                // Publish channel message to bridge
-                try
-                {
-                    // if channel has an id, use it; otherwise fall back to name
-                    std::string channelKey = target;
-                    uint32 chanId = 0;
-                    if (chn)
-                        chanId = chn->GetChannelId();
-                    if (chanId)
-                        channelKey = std::to_string(chanId);
-
-                    std::string from = GetPlayer()->GetName(); if (from.size() > 32) from = from.substr(0,32);
-                    std::string m = msg; if (m.size() > 1024) m = m.substr(0,1024);
-                    std::string json = "{\"type\":\"channel\",\"channel\":\"" + channelKey + "\",\"from\":\"" + from + "\",\"message\":\"" + m + "\"}";
-                    ChatBridge::Instance().Publish(std::string("chat:in:channel:") + channelKey, json);
-                } catch (...) { }
+                chn->Say(sender->GetGUID(), msg, lang); // Channel::Say logs to admin_chat_log
             }
             break;
         }
@@ -606,17 +629,12 @@ void WorldSession::HandleChatMessage(ChatMsg type, Language lang, std::string ms
             WorldPackets::Chat::Chat packet;
             packet.Initialize(ChatMsg(type), lang, sender, nullptr, msg);
             group->BroadcastPacket(packet.Write(), false);
-            // Publish instance chat to bridge
-            try
-            {
+            try {
                 std::string from = GetPlayer()->GetName(); if (from.size() > 32) from = from.substr(0,32);
                 std::string m = msg; if (m.size() > 1024) m = m.substr(0,1024);
                 if (group && group->IsMember(GetPlayer()->GetGUID()))
-                {
-                    uint32 gid = group->GetDbStoreId();
-                    std::string json = "{\"type\":\"instance\",\"groupId\":" + std::to_string(gid) + ",\"from\":\"" + from + "\",\"message\":\"" + m + "\"}";
-                    ChatBridge::Instance().Publish(std::string("chat:in:instance:") + std::to_string(gid), json);
-                }
+                    LogChatToDb(GetPlayer()->GetGUID().GetCounter(), from, GetPlayer()->GetLevel(), CL_Zone(GetPlayer()),
+                        "instance", m, 0, "", "", 0, 0, group->GetDbStoreId());
             } catch (...) { }
             break;
         }

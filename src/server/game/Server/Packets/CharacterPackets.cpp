@@ -561,6 +561,73 @@ void LoadingScreenNotify::Read()
     Showing = _worldPacket.ReadBit();
 }
 
+void OverrideScreenFlash::Read()
+{
+    Disabled = _worldPacket.ReadBit();
+}
+
+void ReportEnabledAddons::Read()
+{
+    uint32 count = _worldPacket.read<uint32>();
+    Addons.resize(count);
+    for (WorldPackets::Addon::AddOnInfo& addon : Addons)
+        _worldPacket >> addon;
+}
+
+void ReportClientVariables::Read()
+{
+    uint32 count = _worldPacket.read<uint32>();
+    Variables.resize(count);
+    for (ClientVariable& var : Variables)
+    {
+        _worldPacket.ResetBitPos();
+        uint32 keyLen = _worldPacket.ReadBits(10);
+        uint32 valLen = _worldPacket.ReadBits(10);
+        if (keyLen > 1)
+        {
+            var.Key = _worldPacket.ReadString(keyLen - 1);
+            _worldPacket.read_skip<uint8>();
+        }
+        if (valLen > 1)
+        {
+            var.Value = _worldPacket.ReadString(valLen - 1);
+            _worldPacket.read_skip<uint8>();
+        }
+    }
+}
+
+void ReportKeybindingExecutionCounts::Read()
+{
+    uint32 count = _worldPacket.read<uint32>();
+    // Defensa: el cliente 3.4.3 envía este paquete con un layout distinto, por lo
+    // que `count` sale corrupto/gigante. Sin acotar, Keybindings.resize(count)
+    // intenta reservar miles de millones de objetos → el hilo World se cuelga
+    // ~60s reservando memoria y el anti-freeze fuerza un crash. Cada entrada
+    // consume >= 1 byte del paquete, así que el count no puede superar los bytes
+    // restantes; si lo hace, el paquete es inválido y lo ignoramos.
+    uint32 const remaining = uint32(_worldPacket.size() - _worldPacket.rpos());
+    if (count > remaining)
+        count = 0;
+    Keybindings.resize(count);
+    for (KeybindingExecutionCount& kb : Keybindings)
+    {
+        _worldPacket.ResetBitPos();
+        uint32 nameLen = _worldPacket.ReadBits(10);
+        if (nameLen > 1)
+        {
+            kb.Binding = _worldPacket.ReadString(nameLen - 1);
+            _worldPacket.read_skip<uint8>();
+        }
+        _worldPacket >> kb.Count;
+    }
+}
+
+WorldPacket const* UpdateGameTimeState::Write()
+{
+    _worldPacket << uint32(State);
+    return &_worldPacket;
+}
+
 WorldPacket const* InitialSetup::Write()
 {
     _worldPacket << uint8(ServerExpansionLevel);
@@ -732,6 +799,24 @@ void ShowingHelm::Read()
 {
     if (_worldPacket.ReadBit())
         ShowHelm = true;
+}
+
+void GetAccountCharacterList::Read()
+{
+    _worldPacket >> Token;
+    _worldPacket >> ListType;
+}
+
+WorldPacket const* GetAccountCharacterListResult::Write()
+{
+    _worldPacket << uint32(Token);
+    _worldPacket << uint32(ListType);
+    _worldPacket << uint32(Characters.size());
+
+    for (EnumCharactersResult::CharacterInfo const& charInfo : Characters)
+        _worldPacket << charInfo;
+
+    return &_worldPacket;
 }
 
 }

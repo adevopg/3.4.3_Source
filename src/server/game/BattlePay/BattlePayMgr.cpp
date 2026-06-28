@@ -24,6 +24,7 @@
 #include "LanguageMgr.h"
 #include "Pet.h"
 #include "Item.h"
+#include "StringFormat.h"
 
 using namespace Battlepay;
 
@@ -132,7 +133,28 @@ void BattlepayManager::ProcessDelivery(const Purchase& purchase, bool onLogin)
         {
             case Battlepay::Item_:
             {
-                // alistar: TODO for items it's kinda tricky maybe we have a npc or a item that will let you claim your items
+                if (player)
+                {
+                    // Entrega cada ítem del producto (battlepay_item). Si el inventario
+                    // está lleno, se manda por correo. Sin esto el poll marcaba la orden
+                    // DELIVERED y avisaba "entregada" pero no daba nada.
+                    for (auto const& it : product->Items)
+                    {
+                        if (!it.ItemID)
+                            continue;
+                        uint16 const qty = uint16(std::min<uint32>(std::max<uint32>(1, it.Quantity), 1000));
+                        if (!player->AddItem(it.ItemID, qty))
+                            MailItems(player, it.ItemID, qty);
+                        claimed = true;
+                    }
+                    // Fallback: producto sin filas en battlepay_item pero con ItemId directo.
+                    if (!claimed && product->ItemId)
+                    {
+                        if (!player->AddItem(product->ItemId, 1))
+                            MailItems(player, product->ItemId, 1);
+                        claimed = true;
+                    }
+                }
                 break;
             }
             case Battlepay::LevelBoost:
@@ -151,10 +173,31 @@ void BattlepayManager::ProcessDelivery(const Purchase& purchase, bool onLogin)
             }
             case Battlepay::Mount:
             {
-                if (player && spellInfo)
+                if (player)
                 {
-                    _session->GetCollectionMgr()->AddMount(spellInfo->Id, MountStatusFlags::MOUNT_STATUS_NONE);
-                    claimed = true;
+                    // 1) Mount de tienda con ÍTEM (reins): se entrega el ítem y el
+                    //    jugador lo usa para aprender la montura. (battlepay_product.ItemId)
+                    if (product->ItemId)
+                    {
+                        if (!player->AddItem(product->ItemId, 1))
+                            MailItems(player, product->ItemId, 1);
+                        claimed = true;
+                    }
+                    // 2) Mount clásico sin ítem: se aprende directo por hechizo.
+                    else if (spellInfo)
+                    {
+                        player->LearnSpell(spellInfo->Id, false);
+                        _session->GetCollectionMgr()->AddMount(spellInfo->Id, MountStatusFlags::MOUNT_STATUS_NONE);
+                        claimed = true;
+                    }
+                    // 3) Ni ítem ni hechizo válido (DisplayId de retail inexistente en 3.4.3).
+                    else
+                    {
+                        TC_LOG_ERROR("server.BattlePay",
+                            "Mount NO entregado: producto {} (DisplayId {}) sin ItemId y sin spell válido. Configura battlepay_product.ItemId o un DisplayId válido.",
+                            product->ProductId, product->DisplayId);
+                        ChatHandler(_session).PSendSysMessage("|cffff0000[Tienda]|r Esta montura no está configurada. Avisa a un administrador.");
+                    }
                 }
                 break;
             }
@@ -164,17 +207,38 @@ void BattlepayManager::ProcessDelivery(const Purchase& purchase, bool onLogin)
             }
             case Battlepay::NameChange:
             {
-                // alistar: TODO
+                if (player)
+                {
+                    player->SetAtLoginFlag(AT_LOGIN_RENAME);
+                    CharacterDatabase.PExecute("UPDATE characters SET at_login = at_login | {} WHERE guid = {}",
+                        uint32(AT_LOGIN_RENAME), player->GetGUID().GetCounter());
+                    ChatHandler(_session).PSendSysMessage("|cff66ccff[Tienda]|r Cambio de nombre activado. Vuelve a la selección de personaje para aplicarlo.");
+                    claimed = true;
+                }
                 break;
             }
             case Battlepay::FactionChange:
             {
-                // alistar: TODO
+                if (player)
+                {
+                    player->SetAtLoginFlag(AT_LOGIN_CHANGE_FACTION);
+                    CharacterDatabase.PExecute("UPDATE characters SET at_login = at_login | {} WHERE guid = {}",
+                        uint32(AT_LOGIN_CHANGE_FACTION), player->GetGUID().GetCounter());
+                    ChatHandler(_session).PSendSysMessage("|cff66ccff[Tienda]|r Cambio de facción activado. Vuelve a la selección de personaje para aplicarlo.");
+                    claimed = true;
+                }
                 break;
             }
             case Battlepay::RaceChange:
             {
-                // alistar: TODO
+                if (player)
+                {
+                    player->SetAtLoginFlag(AT_LOGIN_CHANGE_RACE);
+                    CharacterDatabase.PExecute("UPDATE characters SET at_login = at_login | {} WHERE guid = {}",
+                        uint32(AT_LOGIN_CHANGE_RACE), player->GetGUID().GetCounter());
+                    ChatHandler(_session).PSendSysMessage("|cff66ccff[Tienda]|r Cambio de raza activado. Vuelve a la selección de personaje para aplicarlo.");
+                    claimed = true;
+                }
                 break;
             }
             case Battlepay::CharacterTransfer:
@@ -534,18 +598,8 @@ std::tuple<bool, WorldPackets::BattlePay::DisplayInfo> BattlepayManager::WriteDi
 
 void BattlepayManager::SendAccountCredits()
 {
-    LoginDatabasePreparedStatement* stmt = LoginDatabase.GetPreparedStatement(LOGIN_SEL_BATTLE_PAY_ACCOUNT_CREDITS);
-    stmt->setUInt32(0, _session->GetAccountId());
-    
-    if (PreparedQueryResult result = LoginDatabase.Query(stmt))
-    {
-        const uint64 balance = result->Fetch()[0].GetUInt32();
-
-        std::string strBalance = "|cff66bbffYour current account balance is:|r ";
-        strBalance += (balance ? "|cff00ff00%u$|r" : "|cffff0000%u$|r");
-
-        ChatHandler(_session).PSendSysMessage(strBalance.c_str(), balance);
-    }
+    // Sistema de puntos/créditos DESACTIVADO: las compras se pagan por SumUp (web),
+    // no por saldo de Battlepay. No mostramos "current account balance".
 }
 
 void BattlepayManager::SendBattlePayDistribution(uint32 productId, uint8 status, uint64 distributionId, ObjectGuid targetGuid)
@@ -645,74 +699,82 @@ void BattlepayManager::AssignDistributionToCharacter(ObjectGuid const& targetCha
     SendBattlePayDistribution(productId, purchase->Status, distributionId, targetCharGuid);
 }
 
-void BattlepayManager::Update(uint32 /*diff*/)
+// Poll de entrega de órdenes Battlepay pagadas vía SumUp (NovaWeb).
+// NovaWeb marca `battlepay_orders.status='PAID'` al confirmar el pago; aquí, para
+// el jugador conectado, entregamos cada orden PAID con ProcessDelivery y la
+// marcamos DELIVERED. Idempotente: el UPDATE condicionado a status='PAID' evita
+// doble entrega aunque dos ticks la lean a la vez.
+void BattlepayManager::Update(uint32 diff)
 {
-    TC_LOG_INFO("server.BattlePay", "BattlepayManager::Update");
-    /*
-    auto& data = _actualTransaction;
-    auto product = sBattlePayDataStore->GetProduct(data.ProductID);
+    if (!_session)
+        return;
 
-    switch (data.Status)
-    {
-    case Battlepay::Properties::DistributionStatus::BATTLE_PAY_DIST_STATUS_ADD_TO_PROCESS:
-    {
-        
-        switch (product->Type)
-        {
-        case CharacterBoost:
-        {
-            auto const& player = data.TargetCharacter;
-            if (!player)
-                break;
+    Player* player = _session->GetPlayer();
+    if (!player || !player->IsInWorld())
+        return;
 
-            WorldPackets::BattlePay::BattlePayCharacterUpgradeQueued responseQueued;
-            responseQueued.EquipmentItems = sDB2Manager.GetItemLoadOutItemsByClassID(player->getClass(), 3)[0];
-            responseQueued.Character = data.TargetCharacter;
-            _session->SendPacket(responseQueued.Write());
+    // Throttle: consultamos la BD como mucho cada 5 segundos.
+    if (_sumupPollTimer > diff)
+    {
+        _sumupPollTimer -= diff;
+        return;
+    }
+    _sumupPollTimer = 5 * IN_MILLISECONDS;
 
-            data.Status = DistributionStatus::BATTLE_PAY_DIST_STATUS_PROCESS_COMPLETE;
-            SendBattlePayDistribution(data.ProductID, data.Status, data.DistributionId, data.TargetCharacter);
-            break;
-        }
-        default:
-            break;
-        }
-        break;
-        
-    }
-    case Battlepay::Properties::DistributionStatus::BATTLE_PAY_DIST_STATUS_PROCESS_COMPLETE: //send SMSG_BATTLE_PAY_VAS_PURCHASE_STARTED
+    uint32 const accountId = _session->GetAccountId();
+
+    // Query ASÍNCRONA — NUNCA bloquear el hilo World con DB. Un SELECT/UPDATE síncrono
+    // aquí esperaba el lock de fila que NovaWeb toma al marcar 'PAID' → el hilo World
+    // se congelaba 60s y el anti-freeze forzaba el crash. El callback corre en el hilo
+    // World vía GetQueryProcessor() (ProcessQueryCallbacks), seguro para entregar.
+    std::string sql = Trinity::StringFormat(
+        "SELECT id, product_id FROM battlepay_orders "
+        "WHERE account_id = {} AND status = 'PAID' AND delivered_at IS NULL ORDER BY id ASC",
+        accountId);
+
+    _session->GetQueryProcessor().AddCallback(LoginDatabase.AsyncQuery(sql.c_str()).WithCallback(
+        [this, accountId](QueryResult result)
     {
-        switch (product->WebsiteType)
+        if (!result)
+            return;
+
+        Player* player = _session ? _session->GetPlayer() : nullptr;
+        if (!player || !player->IsInWorld())
+            return;
+
+        do
         {
-        case CharacterBoost:
-        {
-            data.Status = DistributionStatus::BATTLE_PAY_DIST_STATUS_FINISHED;
-            SendBattlePayDistribution(data.ProductID, data.Status, data.DistributionId, data.TargetCharacter);
-            break;
-        }
-        default:
-            break;
-        }
-        break;
-    }
-    case Battlepay::Properties::DistributionStatus::BATTLE_PAY_DIST_STATUS_FINISHED:
-    {
-        switch (product->WebsiteType)
-        {
-        case CharacterBoost:
-            SendBattlePayDistribution(data.ProductID, data.Status, data.DistributionId, data.TargetCharacter);
-            break;
-        default:
-            break;
-        }
-        break;
-    }
-    case Battlepay::Properties::DistributionStatus::BATTLE_PAY_DIST_STATUS_AVAILABLE:
-    case Battlepay::Properties::DistributionStatus::BATTLE_PAY_DIST_STATUS_NONE:
-    default:
-        break;
-    }
-    */
+            Field* fields    = result->Fetch();
+            uint32 orderId   = fields[0].GetUInt32();
+            uint32 productId = fields[1].GetUInt32();
+
+            auto productInfo = sBattlePayDataStore->GetProductInfoForProduct(productId);
+            if (productInfo == nullptr)
+            {
+                TC_LOG_ERROR("server.BattlePay", "SumUp: orden {} con product_id {} sin ProductInfo; no se puede entregar.", orderId, productId);
+                continue;
+            }
+
+            Battlepay::Purchase purchase;
+            purchase.ProductID       = productId;
+            purchase.TargetCharacter = player->GetGUID();
+            purchase.CurrentPrice    = uint64(productInfo->CurrentPriceFixedPoint);
+            purchase.Status          = Battlepay::UpdateStatus::Finish;
+            purchase.PurchaseID      = orderId;
+            purchase.DistributionId  = GenerateNewDistributionId();
+
+            ProcessDelivery(purchase, false);
+            SendProductList();
+
+            // Marca como entregada (async; el SELECT filtra delivered_at IS NULL).
+            LoginDatabase.PExecute(
+                "UPDATE battlepay_orders SET status = 'DELIVERED', delivered_at = UNIX_TIMESTAMP() "
+                "WHERE id = {} AND status = 'PAID'", orderId);
+
+            ChatHandler(_session).PSendSysMessage("|cff00ff00[Tienda]|r Tu compra ha sido entregada. ¡Gracias!");
+            TC_LOG_INFO("server.BattlePay", "SumUp: orden {} (product {}) entregada a la cuenta {}.", orderId, productId, accountId);
+        } while (result->NextRow());
+    }));
 }
 
 uint32 BattlepayManager::GetBattlePayCredits() const

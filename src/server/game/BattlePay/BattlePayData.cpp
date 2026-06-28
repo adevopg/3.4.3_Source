@@ -279,19 +279,21 @@ void BattlePayDataStoreMgr::LoadProduct()
 
         BattlePayData::ProductItem productItem;
 
+        // Columnas: ID(0) UnkByte(1=productID) ItemID(2) Quantity(3) UnkInt1(4)
+        // UnkInt2(5) IsPet(6) PetResult(7) Display(8). (Antes estaban desfasadas:
+        // ItemID se sobrescribía con Quantity → se entregaba un item_id inválido.)
         productItem.ItemID = fields[2].GetUInt32();
-            if (!sItemStore.LookupEntry(productItem.ItemID))
-                continue;
+        if (!sItemStore.LookupEntry(productItem.ItemID))
+            continue;
         productItem.Entry = fields[0].GetUInt32();
         productItem.ID = productID;
-        productItem.UnkByte = fields[2].GetUInt32();
-        productItem.ItemID = fields[3].GetUInt32();
-        productItem.Quantity = fields[4].GetUInt32();
-        productItem.UnkInt1 = fields[5].GetUInt32();
-        productItem.UnkInt2 = fields[6].GetUInt32();
-        productItem.IsPet = fields[7].GetUInt32();
+        productItem.UnkByte = 0;
+        productItem.Quantity = std::max<uint32>(1, fields[3].GetUInt32());
+        productItem.UnkInt1 = fields[4].GetUInt32();
+        productItem.UnkInt2 = fields[5].GetUInt32();
+        productItem.IsPet = fields[6].GetUInt32();
 
-        if (const uint32 petResult = fields[8].GetUInt32())
+        if (const uint32 petResult = fields[7].GetUInt32())
             productItem.PetResult = petResult;
 
         _products[productID].Items.push_back(productItem);

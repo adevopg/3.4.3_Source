@@ -55,7 +55,8 @@
 #include "WorldSocket.h"
 #include "WorldSocketMgr.h"
 #include "Util.h"
-#include "Chat/ChatBridge.h"
+// ChatBridge removed — web chat uses auth.web_chat_queue polled by World::Update
+#include "AutoSnapshot.h"
 #include <openssl/opensslv.h>
 #include <openssl/crypto.h>
 #include <boost/asio/signal_set.hpp>
@@ -426,8 +427,15 @@ extern int main(int argc, char** argv)
         cliThread.reset(new std::thread(CliThread), &ShutdownCLIThread);
     }
 
-    // Start ChatBridge subscriber thread to receive web->game messages via Redis
-    ChatBridge::Instance().StartSubscriber();
+    // Web->game chat is now handled via auth.web_chat_queue polled in World::Update maintenance timer
+
+    // Start auto-snapshot background thread (if enabled in config)
+    if (sConfigMgr->GetBoolDefault("Admin.AutoSnapshot.Enable", false))
+    {
+        uint32 snapInterval = uint32(sConfigMgr->GetIntDefault("Admin.AutoSnapshot.Interval", 1800));
+        uint32 snapKeep     = uint32(sConfigMgr->GetIntDefault("Admin.AutoSnapshot.KeepCount", 10));
+        sAutoSnapshot.Start(snapInterval, snapKeep);
+    }
 
     WorldUpdateLoop();
 
@@ -442,6 +450,9 @@ extern int main(int argc, char** argv)
     sLog->SetSynchronous();
 
     sScriptMgr->OnShutdown();
+
+    // Stop auto-snapshot thread
+    sAutoSnapshot.Stop();
 
     // set server offline
     LoginDatabase.DirectPExecute("UPDATE realmlist SET flag = flag | {} WHERE id = '{}'", REALM_FLAG_OFFLINE, realm.Id.Realm);

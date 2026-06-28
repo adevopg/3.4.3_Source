@@ -726,6 +726,27 @@ void Channel::Say(ObjectGuid const& guid, std::string const& what, uint32 lang) 
 
     SendToAll(builder, !playerInfo.IsModerator() ? guid : ObjectGuid::Empty,
         !playerInfo.IsModerator() && player ? player->GetSession()->GetAccountGUID() : ObjectGuid::Empty);
+
+    // Log to auth.admin_chat_log so the web chat can display channel traffic
+    if (player)
+    {
+        try {
+            auto esc = [](std::string const& s) -> std::string {
+                std::string r; r.reserve(s.size() + 4);
+                for (unsigned char c : s)
+                    if (c == '\'') r += "\\'"; else if (c == '\\') r += "\\\\"; else r += char(c);
+                return r;
+            };
+            std::string safeMsg  = what;               if (safeMsg.size()  > 1024) safeMsg  = safeMsg.substr(0, 1024);
+            std::string safeName = player->GetName();  if (safeName.size() >   32) safeName = safeName.substr(0, 32);
+            std::string chanKey  = GetChannelId() ? std::to_string(GetChannelId()) : GetName(DEFAULT_LOCALE);
+            if (chanKey.size() > 64) chanKey = chanKey.substr(0, 64);
+            LoginDatabase.Execute(("INSERT INTO auth.admin_chat_log"
+                " (char_guid,char_name,char_level,chat_type,message,channel_name)"
+                " VALUES (" + std::to_string(player->GetGUID().GetCounter()) + ",'" + esc(safeName) + "'," +
+                std::to_string(player->GetLevel()) + ",'channel','" + esc(safeMsg) + "','" + esc(chanKey) + "')").c_str());
+        } catch (...) {}
+    }
 }
 
 void Channel::AddonSay(ObjectGuid const& guid, std::string const& prefix, std::string const& what, bool isLogged) const

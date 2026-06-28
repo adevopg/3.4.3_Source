@@ -16,6 +16,7 @@
  */
 
 #include "LoginRESTService.h"
+#include "AdminLogBuffer.h"
 #include "Base64.h"
 #include "Configuration/Config.h"
 #include "CryptoHash.h"
@@ -25,6 +26,7 @@
 #include "IteratorPair.h"
 #include "ProtobufJSON.h"
 #include "Resolver.h"
+#include "StringFormat.h"
 #include "Timer.h"
 #include "Util.h"
 
@@ -370,6 +372,31 @@ LoginRESTService::RequestHandlerResult LoginRESTService::HandlePostLogin(std::sh
             context.response.body() = ::JSON::Serialize(loginResult);
             session->SendResponse(context);
             return;
+        }
+
+        // Maintenance mode: block non-GM logins
+        if (sAdminBuf.MaintenanceMode.load())
+        {
+            auto maintSql = Trinity::StringFormat(
+                "SELECT IFNULL(MAX(aa.SecurityLevel),0) FROM account a"
+                " LEFT JOIN account_access aa ON a.id=aa.AccountID"
+                " WHERE a.battlenet_account={}",
+                accountId);
+            uint8 secLevel = 0;
+            if (auto maintRes = LoginDatabase.Query(maintSql.c_str()))
+                secLevel = maintRes->Fetch()[0].GetUInt8();
+
+            if (secLevel < 1)
+            {
+                JSON::Login::LoginResult loginResult;
+                loginResult.set_authentication_state(JSON::Login::DONE);
+                loginResult.set_error_code("MAINTENANCE");
+                loginResult.set_error_message("El servidor esta en mantenimiento. Solo los GMs pueden conectarse.");
+                context.response.set(boost::beast::http::field::content_type, "application/json;charset=utf-8");
+                context.response.body() = ::JSON::Serialize(loginResult);
+                session->SendResponse(context);
+                return;
+            }
         }
 
         if (loginTicket.empty() || loginTicketExpiry < time(nullptr))

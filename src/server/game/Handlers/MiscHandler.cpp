@@ -1062,6 +1062,13 @@ void WorldSession::HandleSetTaxiBenchmark(WorldPackets::Misc::SetTaxiBenchmarkMo
         _player->RemovePlayerFlag(PLAYER_FLAGS_TAXI_BENCHMARK);
 }
 
+void WorldSession::HandleQueryCountdownTimer(WorldPackets::Misc::QueryCountdownTimer& packet)
+{
+    // Client asks for the current state of a countdown timer type.
+    // No active server-managed countdown timer exists for this session — no response sent.
+    (void)packet;
+}
+
 void WorldSession::HandleGuildSetFocusedAchievement(WorldPackets::Achievement::GuildSetFocusedAchievement& setFocusedAchievement)
 {
     if (Guild* guild = sGuildMgr->GetGuildById(_player->GetGuildId()))

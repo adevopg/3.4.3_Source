@@ -31,15 +31,13 @@ ByteBuffer& operator>>(ByteBuffer& data, WorldPackets::Ticket::SupportTicketHead
 
 WorldPacket const* WorldPackets::Ticket::GMTicketSystemStatus::Write()
 {
-    _worldPacket << int32(Status);
-
+    _worldPacket << int32(Status);                 // 4 bytes (dump: Status=1)
     return &_worldPacket;
 }
 
 WorldPacket const* WorldPackets::Ticket::GMTicketCaseStatus::Write()
 {
-    _worldPacket << int32(Cases.size());
-
+    _worldPacket << uint32(Cases.size());          // count=0 -> 4 bytes (validado)
     for (GMTicketCase const& c : Cases)
     {
         _worldPacket << int32(c.CaseID);
@@ -48,15 +46,12 @@ WorldPacket const* WorldPackets::Ticket::GMTicketCaseStatus::Write()
         _worldPacket << uint16(c.CfgRealmID);
         _worldPacket << uint64(c.CharacterID);
         _worldPacket << int32(c.WaitTimeOverrideMinutes);
-
-        _worldPacket.WriteBits(c.Url.size(), 11);
-        _worldPacket.WriteBits(c.WaitTimeOverrideMessage.size(), 10);
-
+        _worldPacket.WriteBits(c.Url.length(), 11);
+        _worldPacket.WriteBits(c.WaitTimeOverrideMessage.length(), 10);
+        _worldPacket.FlushBits();
         _worldPacket.WriteString(c.Url);
         _worldPacket.WriteString(c.WaitTimeOverrideMessage);
     }
-
-    _worldPacket.FlushBits();
     return &_worldPacket;
 }
 

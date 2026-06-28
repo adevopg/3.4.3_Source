@@ -203,6 +203,7 @@ private:
     WorldSession* _session;
     uint64 _distributionIDCount;
     std::string _walletName;
+    uint32 _sumupPollTimer = 0; // throttle del poll de entrega de órdenes SumUp
 };
 
 #endif

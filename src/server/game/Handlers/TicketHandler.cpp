@@ -20,21 +20,66 @@
 #include "DatabaseEnv.h"
 #include "SupportMgr.h"
 #include "TicketPackets.h"
+#include "Player.h"
+#include "Random.h"
+#include <ctime>
+#include <sstream>
+
+std::string WorldSession::RefreshSupportToken()
+{
+    uint32 const accountId = GetAccountId();
+    uint64 issued = uint64(time(nullptr));
+    uint64 expiry = issued + 14400;
+
+    std::ostringstream tok;
+    tok << "SP-" << accountId << "-" << uint32(issued) << "-" << urand(100000, 999999);
+    std::string token = tok.str();
+    std::string tokEsc = token; LoginDatabase.EscapeString(tokEsc);
+    // Guardamos la IP del jugador: el navegador de soporte abre www.inna.cl/s SIN
+    // token y la web lo auto-loguea emparejando esta IP con el token. SÍNCRONO
+    // (DirectPExecute) para que esté commiteado antes de que el navegador llegue;
+    // battlepay_sso no tiene contención de locks, así que es seguro en el hilo World.
+    std::string ip = GetRemoteAddress(); LoginDatabase.EscapeString(ip);
+    LoginDatabase.DirectPExecute(
+        "INSERT INTO battlepay_sso (account_id, token, issued_at, expiry_at, client_ip) VALUES ({}, '{}', {}, {}, '{}') "
+        "ON DUPLICATE KEY UPDATE token = VALUES(token), issued_at = VALUES(issued_at), expiry_at = VALUES(expiry_at), client_ip = VALUES(client_ip)",
+        accountId, tokEsc, issued, expiry, ip);
+    return token;
+}
 
 void WorldSession::HandleGMTicketGetCaseStatusOpcode(WorldPackets::Ticket::GMTicketGetCaseStatus& /*packet*/)
 {
-    // TODO: Implement GmCase and handle this packet properly
-    WorldPackets::Ticket::GMTicketCaseStatus status;
-    SendPacket(status.Write());
+    WorldPackets::Ticket::GMTicketCaseStatus response;
+
+    // Refrescamos el token (y la IP) y mandamos un caso cuya Url apunta a nuestro
+    // portal autenticado (el "open your ticket" lleva el token directo).
+    std::string token = RefreshSupportToken();
+
+    WorldPackets::Ticket::GMTicketCaseStatus::GMTicketCase c;
+    c.CaseID = 1;
+    c.CaseStatus = 1;
+    c.CfgRealmID = 1;
+    c.CharacterID = GetPlayer() ? GetPlayer()->GetGUID().GetCounter() : 0;
+    c.WaitTimeOverrideMinutes = 0;
+    c.Url = "https://www.inna.cl/login/sso?dest=soporte&token=" + token;
+    response.Cases.push_back(c);
+
+    SendPacket(response.Write());
+
+    TC_LOG_INFO("server.BattlePay", "SMSG_GM_TICKET_CASE_STATUS Url={} | cuenta {}", c.Url, GetAccountId());
 }
 
 void WorldSession::HandleGMTicketSystemStatusOpcode(WorldPackets::Ticket::GMTicketGetSystemStatus& /*packet*/)
 {
-    // Note: This only disables the ticket UI at client side and is not fully reliable
-    // Note: This disables the whole customer support UI after trying to send a ticket in disabled state (MessageBox: "GM Help Tickets are currently unavaiable."). UI remains disabled until the character relogs.
+    // Status=1 FIJO -> habilita el soporte (sin depender del config).
+    // Refrescamos el token aquí también (se pide al abrir la ayuda, antes del case).
+    RefreshSupportToken();
+
     WorldPackets::Ticket::GMTicketSystemStatus response;
-    response.Status = sSupportMgr->GetSupportSystemStatus() ? GMTICKET_QUEUE_STATUS_ENABLED : GMTICKET_QUEUE_STATUS_DISABLED;
+    response.Status = 1;
     SendPacket(response.Write());
+
+    TC_LOG_INFO("server.BattlePay", "SMSG_GM_TICKET_SYSTEM_STATUS Status=1 | cuenta {}", GetAccountId());
 }
 
 void WorldSession::HandleSubmitUserFeedback(WorldPackets::Ticket::SubmitUserFeedback& userFeedback)

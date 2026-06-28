@@ -398,8 +398,61 @@ void WorldSession::HandleCharEnum(CharacterDatabaseQueryHolder const& holder)
         charEnum.RaceUnlockData.push_back(raceUnlock);
     }
 
-    TC_LOG_ERROR("network", "HandleCharEnum: IsDeletedCharacters={}, returning {} characters", charEnum.IsDeletedCharacters, charEnum.Characters.size());
     SendPacket(charEnum.Write());
+}
+
+void WorldSession::HandleGetAccountCharacterList(WorldPackets::Character::GetAccountCharacterList& packet)
+{
+    uint32 token    = packet.Token;
+    uint32 listType = packet.ListType;
+
+    std::shared_ptr<EnumCharactersQueryHolder> holder = std::make_shared<EnumCharactersQueryHolder>();
+    if (!holder->Initialize(GetAccountId(), sWorld->getBoolConfig(CONFIG_DECLINED_NAMES_USED), false))
+    {
+        // No DB needed — build empty response synchronously
+        WorldPackets::Character::GetAccountCharacterListResult result;
+        result.Token    = token;
+        result.ListType = listType;
+        SendPacket(result.Write());
+        return;
+    }
+
+    AddQueryHolderCallback(CharacterDatabase.DelayQueryHolder(holder)).AfterComplete(
+        [this, token, listType](SQLQueryHolderBase const& holderBase)
+        {
+            EnumCharactersQueryHolder const& h = static_cast<EnumCharactersQueryHolder const&>(holderBase);
+
+            std::unordered_map<ObjectGuid::LowType, std::vector<UF::ChrCustomizationChoice>> customizations;
+            if (PreparedQueryResult custResult = h.GetPreparedResult(EnumCharactersQueryHolder::CUSTOMIZATIONS))
+            {
+                do
+                {
+                    Field* f = custResult->Fetch();
+                    UF::ChrCustomizationChoice& choice = customizations[f[0].GetUInt64()].emplace_back();
+                    choice.ChrCustomizationOptionID = f[1].GetUInt32();
+                    choice.ChrCustomizationChoiceID = f[2].GetUInt32();
+                } while (custResult->NextRow());
+            }
+
+            WorldPackets::Character::GetAccountCharacterListResult result;
+            result.Token    = token;
+            result.ListType = listType;
+
+            if (PreparedQueryResult charResult = h.GetPreparedResult(EnumCharactersQueryHolder::CHARACTERS))
+            {
+                do
+                {
+                    result.Characters.emplace_back(charResult->Fetch());
+                    WorldPackets::Character::EnumCharactersResult::CharacterInfo& ci = result.Characters.back();
+
+                    if (std::vector<UF::ChrCustomizationChoice>* custom = Trinity::Containers::MapGetValuePtr(customizations, ci.Guid.GetCounter()))
+                        ci.Customizations = std::move(*custom);
+
+                } while (charResult->NextRow() && result.Characters.size() < MAX_CHARACTERS_PER_REALM);
+            }
+
+            SendPacket(result.Write());
+        });
 }
 
 void WorldSession::HandleCharEnumOpcode(WorldPackets::Character::EnumCharacters& /*enumCharacters*/)
@@ -426,7 +479,6 @@ void WorldSession::HandleCharUndeleteEnumOpcode(WorldPackets::Character::EnumCha
 {
     /// get all the data necessary for loading all undeleted characters (along with their pets) on the account
     std::shared_ptr<EnumCharactersQueryHolder> holder = std::make_shared<EnumCharactersQueryHolder>();
-    TC_LOG_ERROR("network", "HandleCharUndeleteEnumOpcode: request for deleted characters by account {}", GetAccountId());
     if (!holder->Initialize(GetAccountId(), sWorld->getBoolConfig(CONFIG_DECLINED_NAMES_USED), true))
     {
         HandleCharEnum(*holder);
@@ -1054,6 +1106,52 @@ void WorldSession::HandleLoadScreenOpcode(WorldPackets::Character::LoadingScreen
     // TODO: Do something with this packet
 }
 
+void WorldSession::HandleOverrideScreenFlash(WorldPackets::Character::OverrideScreenFlash& /*packet*/)
+{
+    // Client-side UI preference — no server-side state change required.
+}
+
+void WorldSession::HandleReportClientVariables(WorldPackets::Character::ReportClientVariables& packet)
+{
+    for (WorldPackets::Character::ClientVariable const& var : packet.Variables)
+        TC_LOG_DEBUG("network", "CMSG_REPORT_CLIENT_VARIABLES: Account {} Variable '{}' = '{}'",
+            GetAccountId(), var.Key, var.Value);
+}
+
+void WorldSession::HandleReportEnabledAddons(WorldPackets::Character::ReportEnabledAddons& packet)
+{
+    for (WorldPackets::Addon::AddOnInfo const& addon : packet.Addons)
+    {
+        TC_LOG_DEBUG("network", "CMSG_REPORT_ENABLED_ADDONS: Account {} Addon '{}' version '{}' loaded={} disabled={}",
+            GetAccountId(), addon.Name, addon.Version, addon.Loaded, addon.Disabled);
+
+        // Check against BannedAddons.db2
+        for (BannedAddonsEntry const* banned : sBannedAddonsStore)
+        {
+            if (addon.Name == banned->Name &&
+                (banned->Version[0] == '\0' || addon.Version == banned->Version))
+            {
+                TC_LOG_WARN("network", "CMSG_REPORT_ENABLED_ADDONS: Account {} is using banned addon '{}' version '{}'",
+                    GetAccountId(), addon.Name, addon.Version);
+                break;
+            }
+        }
+    }
+}
+
+void WorldSession::HandleReportKeybindingExecutionCounts(WorldPackets::Character::ReportKeybindingExecutionCounts& packet)
+{
+    for (WorldPackets::Character::KeybindingExecutionCount const& kb : packet.Keybindings)
+        TC_LOG_DEBUG("network", "CMSG_REPORT_KEYBINDING_EXECUTION_COUNTS: Account {} Binding '{}' count={}",
+            GetAccountId(), kb.Binding, kb.Count);
+}
+
+void WorldSession::HandleGetAccountNotifications(WorldPackets::Character::GetAccountNotifications& /*packet*/)
+{
+    // Client requests pending account-level notifications. Respond with an empty list.
+    SendPacket(WorldPackets::Character::AccountNotificationsResponse().Write());
+}
+
 void WorldSession::HandlePlayerLogin(LoginQueryHolder const& holder)
 {
     ObjectGuid playerGuid = holder.GetGuid();
@@ -1102,6 +1200,10 @@ void WorldSession::HandlePlayerLogin(LoginQueryHolder const& holder)
     SendAccountDataTimes(playerGuid, ALL_ACCOUNT_DATA_CACHE_MASK);
 
     SendFeatureSystemStatus();
+
+    // Soporte web: generamos ya el token SSO (con la IP) al entrar al mundo, para
+    // que el navegador de "Customer Support" (www.inna.cl/s) auto-loguee sin carrera.
+    RefreshSupportToken();
 
     // Send MOTD
     {
@@ -1441,10 +1543,7 @@ void WorldSession::SendFeatureSystemStatus()
     SendPacket(features.Write());
 
     // Tell the client that game time is active so it does not disconnect the player.
-    // SMSG_UPDATE_GAME_TIME_STATE: 0 = subscription OK / not paused.
-    WorldPacket gameTimeState(SMSG_UPDATE_GAME_TIME_STATE, 4);
-    gameTimeState << uint32(0);
-    SendPacket(&gameTimeState);
+    SendPacket(WorldPackets::Character::UpdateGameTimeState().Write());
 }
 
 void WorldSession::HandleSetFactionAtWar(WorldPackets::Character::SetFactionAtWar& packet)

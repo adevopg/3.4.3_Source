@@ -8,6 +8,10 @@
 #include "ObjectMgr.h"
 #include "ScriptMgr.h"
 #include "Random.h"
+#include "Chat.h"
+#include <ctime>
+#include <iomanip>
+#include <fstream>
 #include <sstream>
 
 namespace
@@ -113,56 +117,50 @@ void WorldSession::SendMakePurchase(ObjectGuid targetCharacter, uint32 clientTok
 
     mgr->RegisterStartPurchase(purchase);
 
-    auto accountCredits = GetBattlePayMgr()->GetBattlePayCredits();
     auto purchaseData = mgr->GetPurchase();
 
-    if (accountCredits < static_cast<uint64>(purchaseData->CurrentPrice))
+    // ── TODO el pago va por SumUp (web). NUNCA usamos puntos/créditos. ───────
+    // Creamos SIEMPRE una orden PENDING que NovaWeb cobrará por la pasarela; al
+    // confirmarse el pago, BattlepayManager::Update la entrega (ProcessDelivery).
+    // Precio en €: de `battlepay_price` si está listado; si no, del precio nativo
+    // del producto (CurrentPriceFixedPoint / g_CurrencyPrecision, p.ej. $10 → 10.00).
+    std::string productName;
+    float priceEur = float(productInfo.CurrentPriceFixedPoint) / float(Battlepay::g_CurrencyPrecision);
+
+    if (QueryResult priceRes = LoginDatabase.PQuery(
+            "SELECT product_name, price_eur FROM battlepay_price WHERE product_id = {} AND enabled = 1", productID))
     {
-        SendStartPurchaseResponse(session, *purchaseData, Battlepay::Error::InsufficientBalance);
-        return;
+        Field* pf = priceRes->Fetch();
+        productName = pf[0].GetString();
+        priceEur = pf[1].GetFloat();
     }
+    LoginDatabase.EscapeString(productName);
 
-    for (uint32 productId : productInfo.ProductIds)
-    {
-        if (sBattlePayDataStore->ProductExist(productId))
-        {
-            BattlePayData::Product product = *sBattlePayDataStore->GetProduct(productId);
+    // Una única orden PENDING por (cuenta, producto): limpiamos las anteriores.
+    LoginDatabase.PExecute(
+        "DELETE FROM battlepay_orders WHERE account_id = {} AND product_id = {} AND status = 'PENDING'",
+        accountID, productID);
 
-            // if buy is disabled in product addons
-            auto productAddon = sBattlePayDataStore->GetProductAddon(productInfo.Entry);
-            if (productAddon)
-                if (productAddon->DisableBuy > 0)
-                    SendStartPurchaseResponse(session, *purchaseData, Battlepay::Error::PurchaseDenied);
+    std::string reference = "bp_" + std::to_string(accountID) + "_" + std::to_string(productID) +
+        "_" + std::to_string(uint32(time(nullptr))) + "_" + std::to_string(urand(1000, 9999));
+    LoginDatabase.PExecute(
+        "INSERT INTO battlepay_orders (reference, account_id, product_id, product_name, price_eur, status, created_at) "
+        "VALUES ('{}', {}, {}, '{}', {:.2f}, 'PENDING', UNIX_TIMESTAMP())",
+        reference, accountID, productID, productName, priceEur);
 
-            if (!product.Items.empty())
-            {
-                if (player)
-                {
-                    if (product.Items.size() > GetBagsFreeSlots(player))
-                    {
-                        SendStartPurchaseResponse(session, *purchaseData, Battlepay::Error::PurchaseDenied);
-                        return;
-                    }
-                }
-            }
-        }
-        else
-        {
-            SendStartPurchaseResponse(session, *purchaseData, Battlepay::Error::PurchaseDenied);
-            return;
-        }
-    }
+    ChatHandler(session).PSendSysMessage(
+        "|cff66ccff[Tienda]|r Abriendo la pasarela de pago...");
 
+    // En vez del flujo de puntos, disparamos el CHECKOUT WEB (pasarela): respondemos
+    // OK a StartPurchase y enviamos SMSG_BATTLE_PAY_START_CHECKOUT para que el cliente
+    // abra la pasarela. (El pago real se confirma por SumUp; la entrega la hace el poll.)
     purchaseData->PurchaseID = sBattlePayDataStore->GenerateNewPurchaseID();
-    purchaseData->ServerToken = urand(0, 0xFFFFFFF);
-
     SendStartPurchaseResponse(session, *purchaseData, Battlepay::Error::Ok);
-    SendPurchaseUpdate(session, *purchaseData, Battlepay::Error::Ok);
 
-    WorldPackets::BattlePay::ConfirmPurchase confirmPurchase;
-    confirmPurchase.PurchaseID = purchaseData->PurchaseID;
-    confirmPurchase.ServerToken = purchaseData->ServerToken;
-    session->SendPacket(confirmPurchase.Write());
+    WorldPackets::BattlePay::BattlePayStartCheckout checkout;
+    checkout.ClientToken = clientToken;
+    checkout.PurchaseID  = purchaseData->PurchaseID;
+    session->SendPacket(checkout.Write());
 };
 
 void WorldSession::HandleBattlePayStartPurchase(WorldPackets::BattlePay::StartPurchase& packet)
@@ -212,6 +210,58 @@ void WorldSession::HandleBattlePayConfirmPurchase(WorldPackets::BattlePay::Confi
 
 void WorldSession::HandleBattlePayAckFailedResponse(WorldPackets::BattlePay::BattlePayAckFailedResponse& /*packet*/)
 {
+}
+
+// CMSG_BATTLE_PAY_OPEN_CHECKOUT (0x3714): el cliente pide abrir la pasarela web.
+// Respondemos con SMSG_BATTLE_PAY_START_CHECKOUT (0x2824) para que abra el checkout.
+void WorldSession::HandleBattlePayOpenCheckout(WorldPackets::BattlePay::BattlePayOpenCheckout& packet)
+{
+    std::ostringstream hex;
+    hex << std::uppercase << std::hex << std::setfill('0');
+    for (uint8 b : packet.RawData)
+        hex << std::setw(2) << uint32(b) << ' ';
+
+    Player* plr = GetPlayer();
+    TC_LOG_INFO("server.BattlePay",
+        "CMSG_BATTLE_PAY_OPEN_CHECKOUT | cuenta {} | jugador {} | ClientToken {} | extra {} bytes: {}",
+        GetAccountId(),
+        plr ? plr->GetName() : std::string("<sin jugador>"),
+        packet.ClientToken,
+        uint32(packet.RawData.size()),
+        packet.RawData.empty() ? std::string("(ninguno)") : hex.str());
+
+    // ── HIPÓTESIS SSO (RE 12.x): tras OPEN_CHECKOUT el cliente NO espera 0x2824,
+    // espera SMSG_GENERATE_SSO_TOKEN_RESPONSE (0x281E) con el token con el que
+    // autentica la webview del checkout. No existe CMSG separado: el request va
+    // embebido en OPEN_CHECKOUT. Estructura (de 12.x):
+    //   uint64 ClientToken (eco) | uint64 IssuedTime | uint64 ExpiryTime | string SSOToken (al final)
+    uint32 accountId = GetAccountId();
+    uint64 issued = uint64(time(nullptr));
+    uint64 expiry = issued + 14400; // 4 h
+
+    // Token que la web (inna.cl) podrá validar → cuenta + orden PENDING.
+    std::ostringstream tok;
+    tok << "EU-" << accountId << "-" << uint32(issued) << "-" << urand(100000, 999999);
+    std::string ssoToken = tok.str();
+
+    // Persistir para validación web (idempotente por cuenta: borra anteriores vivos).
+    LoginDatabase.PExecute("DELETE FROM battlepay_sso WHERE account_id = {}", accountId);
+    std::string tokEsc = ssoToken; LoginDatabase.EscapeString(tokEsc);
+    LoginDatabase.PExecute(
+        "INSERT INTO battlepay_sso (account_id, token, issued_at, expiry_at) VALUES ({}, '{}', {}, {})",
+        accountId, tokEsc, issued, expiry);
+
+    WorldPacket data(SMSG_GENERATE_SSO_TOKEN_RESPONSE, 25 + ssoToken.size());
+    data << uint64(packet.ClientToken);
+    data << uint64(issued);
+    data << uint64(expiry);
+    data << uint8(ssoToken.size()); // el cliente lee 1 byte de longitud antes del token
+    data.WriteString(ssoToken);
+    SendPacket(&data, true); // forced: 0x281E está registrado STATUS_UNHANDLED (server opcode)
+
+    TC_LOG_INFO("server.BattlePay",
+        "SMSG_GENERATE_SSO_TOKEN_RESPONSE enviado | cuenta {} | token '{}' | {} bytes",
+        accountId, ssoToken, uint32(24 + ssoToken.size()));
 }
 
 void WorldSession::HandleBattlePayRequestPriceInfo(WorldPackets::BattlePay::BattlePayRequestPriceInfo& packet)

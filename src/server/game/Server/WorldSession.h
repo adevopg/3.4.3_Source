@@ -235,7 +235,14 @@ namespace WorldPackets
         class PlayerLogin;
         class LogoutRequest;
         class LogoutCancel;
+        class GetAccountCharacterList;
+        class GetAccountCharacterListResult;
         class LoadingScreenNotify;
+        class OverrideScreenFlash;
+        class ReportClientVariables;
+        class ReportEnabledAddons;
+        class ReportKeybindingExecutionCounts;
+        class GetAccountNotifications;
         class SetActionBarToggles;
         class RequestPlayedTime;
         class SetTitle;
@@ -501,6 +508,7 @@ namespace WorldPackets
         class MountSetFavorite;
         class CloseInteraction;
         class ConversationLineStarted;
+        class QueryCountdownTimer;
         class RequestLatestSplashScreen;
         class ShowTradeSkill;
     }
@@ -808,6 +816,7 @@ namespace WorldPackets
         class GetProductList;
         class GetPurchaseListQuery;
         class UpdateVasPurchaseStates;
+        class BattlePayOpenCheckout;
         class BattlePayAckFailedResponse;
         class BattlePayQueryClassTrialResult;
         class BattlePayTrialBoostCharacter;
@@ -1160,6 +1169,7 @@ class TC_GAME_API WorldSession
 
         void HandleCharEnum(CharacterDatabaseQueryHolder const& holder);
         void HandleCharEnumOpcode(WorldPackets::Character::EnumCharacters& /*enumCharacters*/);
+        void HandleGetAccountCharacterList(WorldPackets::Character::GetAccountCharacterList& packet);
         void HandleCharUndeleteEnumOpcode(WorldPackets::Character::EnumCharacters& /*enumCharacters*/);
         void HandleCharDeleteOpcode(WorldPackets::Character::CharDelete& charDelete);
         void HandleCharCreateOpcode(WorldPackets::Character::CreateCharacter& charCreate);
@@ -1169,6 +1179,11 @@ class TC_GAME_API WorldSession
         void HandleContinuePlayerLogin();
         void AbortLogin(WorldPackets::Character::LoginFailureReason reason);
         void HandleLoadScreenOpcode(WorldPackets::Character::LoadingScreenNotify& loadingScreenNotify);
+        void HandleOverrideScreenFlash(WorldPackets::Character::OverrideScreenFlash& packet);
+        void HandleReportClientVariables(WorldPackets::Character::ReportClientVariables& packet);
+        void HandleReportEnabledAddons(WorldPackets::Character::ReportEnabledAddons& packet);
+        void HandleReportKeybindingExecutionCounts(WorldPackets::Character::ReportKeybindingExecutionCounts& packet);
+        void HandleGetAccountNotifications(WorldPackets::Character::GetAccountNotifications& packet);
         void HandlePlayerLogin(LoginQueryHolder const& holder);
         void HandleCheckCharacterNameAvailability(WorldPackets::Character::CheckCharacterNameAvailability& checkCharacterNameAvailability);
         void HandleCharRenameOpcode(WorldPackets::Character::CharacterRenameRequest& request);
@@ -1245,6 +1260,10 @@ class TC_GAME_API WorldSession
         // GM Ticket opcodes
         void HandleGMTicketGetCaseStatusOpcode(WorldPackets::Ticket::GMTicketGetCaseStatus& packet);
         void HandleGMTicketSystemStatusOpcode(WorldPackets::Ticket::GMTicketGetSystemStatus& packet);
+        // Genera+guarda (sync) un token SSO de soporte con la IP del jugador y lo
+        // devuelve. Se llama al entrar al mundo para que /es/s auto-loguee sin
+        // carrera (el navegador llega antes que el case status).
+        std::string RefreshSupportToken();
         void HandleSubmitUserFeedback(WorldPackets::Ticket::SubmitUserFeedback& userFeedback);
         void HandleSupportTicketSubmitComplaint(WorldPackets::Ticket::SupportTicketSubmitComplaint& packet);
         void HandleBugReportOpcode(WorldPackets::Ticket::BugReport& bugReport);
@@ -1601,6 +1620,7 @@ class TC_GAME_API WorldSession
         void HandleSetRaidDifficultyOpcode(WorldPackets::Misc::SetRaidDifficulty& setRaidDifficulty);
         void HandleSetTitleOpcode(WorldPackets::Character::SetTitle& packet);
         void HandleTimeSyncResponse(WorldPackets::Misc::TimeSyncResponse& timeSyncResponse);
+        void HandleQueryCountdownTimer(WorldPackets::Misc::QueryCountdownTimer& packet);
         void HandleWhoIsOpcode(WorldPackets::Who::WhoIsRequest& packet);
         void HandleResetInstancesOpcode(WorldPackets::Instance::ResetInstances& packet);
         void HandleInstanceLockResponse(WorldPackets::Instance::InstanceLockResponse& packet);
@@ -1945,6 +1965,7 @@ class TC_GAME_API WorldSession
         void HandleBattlePayDistributionAssign(WorldPackets::BattlePay::DistributionAssignToTarget& packet);
         void HandleBattlePayStartPurchase(WorldPackets::BattlePay::StartPurchase& packet);
         void HandleBattlePayConfirmPurchase(WorldPackets::BattlePay::ConfirmPurchaseResponse& packet);
+        void HandleBattlePayOpenCheckout(WorldPackets::BattlePay::BattlePayOpenCheckout& packet);
         void HandleBattlePayAckFailedResponse(WorldPackets::BattlePay::BattlePayAckFailedResponse& packet);
         void HandleGetPurchaseListQuery(WorldPackets::BattlePay::GetPurchaseListQuery& packet);
         void HandleUpdateVasPurchaseStates(WorldPackets::BattlePay::UpdateVasPurchaseStates& packet);

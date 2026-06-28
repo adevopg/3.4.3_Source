@@ -34,6 +34,7 @@
 #include "BattlenetRpcErrorCodes.h"
 #include "BattlePayData.h"
 #include "CalendarMgr.h"
+#include "Channel.h"
 #include "ChannelMgr.h"
 #include "CharacterCache.h"
 #include "CharacterDatabaseCleaner.h"
@@ -58,6 +59,7 @@
 #include "GitRevision.h"
 #include "GridNotifiersImpl.h"
 #include "GroupMgr.h"
+#include "Guild.h"
 #include "GuildMgr.h"
 #include "IPLocation.h"
 #include "InstanceLockMgr.h"
@@ -105,7 +107,7 @@
 #include "WorldSession.h"
 #include "WorldSocket.h"
 #include "WorldStateMgr.h"
-#include "Chat/ChatBridge.h"
+// ChatBridge removed — web chat uses auth.web_chat_queue
 
 #include <boost/algorithm/string.hpp>
 
@@ -1817,6 +1819,43 @@ void World::SetInitialWorldSettings()
     TC_LOG_INFO("misc", "Indexing loaded data stores...");
     sDB2Manager.IndexLoadedStores();
 
+    // Sync achievement points from in-memory DB2 store to auth.achievement_pts for portal rankings
+    {
+        LoginDatabase.DirectExecute(
+            "CREATE TABLE IF NOT EXISTS auth.achievement_pts ("
+            "  id INT UNSIGNED NOT NULL,"
+            "  points TINYINT NOT NULL DEFAULT 0,"
+            "  PRIMARY KEY (id)"
+            ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+        std::ostringstream achBatch;
+        bool firstAch = true;
+        uint32 achCount = 0;
+        for (AchievementEntry const* ach : sAchievementStore)
+        {
+            if (!ach) continue;
+            if (!firstAch) achBatch << ',';
+            achBatch << '(' << ach->ID << ',' << (int32)ach->Points << ')';
+            firstAch = false;
+            ++achCount;
+            // Flush every 500 entries to avoid huge SQL strings
+            if (achCount % 500 == 0)
+            {
+                LoginDatabase.DirectExecute(("INSERT INTO auth.achievement_pts (id,points) VALUES" + achBatch.str() +
+                    " ON DUPLICATE KEY UPDATE points=VALUES(points)").c_str());
+                achBatch.str("");
+                achBatch.clear();
+                firstAch = true;
+            }
+        }
+        if (!firstAch)
+        {
+            LoginDatabase.DirectExecute(("INSERT INTO auth.achievement_pts (id,points) VALUES" + achBatch.str() +
+                " ON DUPLICATE KEY UPDATE points=VALUES(points)").c_str());
+        }
+        TC_LOG_INFO("server.loading", "Synced {} achievement point entries to auth.achievement_pts.", achCount);
+    }
+
     ///- Load M2 fly by cameras
     LoadM2Cameras(m_dataPath);
     ///- Load GameTables
@@ -2419,6 +2458,8 @@ void World::SetInitialWorldSettings()
 
     m_timers[WUPDATE_CHANNEL_SAVE].SetInterval(getIntConfig(CONFIG_PRESERVE_CUSTOM_CHANNEL_INTERVAL) * MINUTE * IN_MILLISECONDS);
 
+    m_timers[WUPDATE_MAINTENANCE].SetInterval(5 * IN_MILLISECONDS); // check realmlist.allowedSecurityLevel every 5 seconds
+
     //to set mailtimer to return mails every day between 4 and 5 am
     //mailtimer is increased when updating auctions
     //one second is 1000 -(tested on win system)
@@ -2570,8 +2611,7 @@ void World::Update(uint32 diff)
 
     sWorldUpdateTime.UpdateWithDiff(diff);
 
-    // Process any incoming web chat messages queued by ChatBridge subscriber thread
-    ChatBridge::Instance().ProcessIncoming();
+    // (web chat is now polled in the WUPDATE_MAINTENANCE block below)
 
     ///- Update the different timers
     for (int i = 0; i < WUPDATE_COUNT; ++i)
@@ -2588,6 +2628,128 @@ void World::Update(uint32 diff)
         TC_METRIC_TIMER("world_update_time", TC_METRIC_TAG("type", "Update who list"));
         m_timers[WUPDATE_WHO_LIST].Reset();
         sWhoListStorageMgr->Update();
+    }
+
+    ///- Sync allowedSecurityLevel from realmlist (maintenance mode support)
+    if (m_timers[WUPDATE_MAINTENANCE].Passed())
+    {
+        m_timers[WUPDATE_MAINTENANCE].Reset();
+        LoadDBAllowedSecurityLevel();
+        // Check for admin-panel RBAC reload signal
+        if (auto rbacRes = LoginDatabase.Query("SELECT rbac_reload FROM admin_pending_reload WHERE id=1"))
+        {
+            if (rbacRes->Fetch()[0].GetUInt8())
+            {
+                TC_LOG_INFO("rbac", "World: Admin panel triggered RBAC reload");
+                ReloadRBAC();
+                LoginDatabase.DirectExecute("UPDATE admin_pending_reload SET rbac_reload=0 WHERE id=1");
+            }
+        }
+        // Process web-portal chat messages (auth.web_chat_queue → in-game chat)
+        if (auto wq = LoginDatabase.Query(
+            "SELECT id,game_account_id,char_guid,chat_type,message,target,channel_name"
+            " FROM auth.web_chat_queue ORDER BY id LIMIT 20"))
+        {
+            // Collect first — closes result set so nested DB queries are safe below
+            struct WebMsg { uint64 rid; uint32 accId; uint32 cguid; std::string ctype, cmsg, ctarget, cchan; };
+            std::vector<WebMsg> webMsgs;
+            do {
+                auto fq = wq->Fetch();
+                webMsgs.push_back({fq[0].GetUInt64(), fq[1].GetUInt32(), fq[2].GetUInt32(),
+                    fq[3].GetString(), fq[4].GetString(), fq[5].GetString(), fq[6].GetString()});
+            } while (wq->NextRow());
+
+            for (auto& m : webMsgs)
+            {
+                LoginDatabase.DirectExecute(Trinity::StringFormat("DELETE FROM auth.web_chat_queue WHERE id={}", m.rid).c_str());
+
+                // Only use the exact selected character — never fall back to other chars on the account
+                Player* player = m.cguid ? ObjectAccessor::FindPlayer(ObjectGuid::Create<HighGuid::Player>(m.cguid)) : nullptr;
+
+                if (!player)
+                {
+                    // Character is offline in-game: fetch name for display
+                    std::string charName;
+                    if (auto nr = LoginDatabase.Query(("SELECT name FROM characters.characters WHERE guid=" + std::to_string(m.cguid)).c_str()))
+                        charName = nr->Fetch()[0].GetString();
+                    if (charName.empty()) continue;
+
+                    if (m.ctype == "whisper" && !m.ctarget.empty())
+                    {
+                        // Deliver as a real CHAT_MSG_WHISPER so the receiver can /r back
+                        if (Player* recv = ObjectAccessor::FindPlayerByName(m.ctarget))
+                        {
+                            ObjectGuid webGuid = ObjectGuid::Create<HighGuid::Player>(m.cguid);
+                            WorldPackets::Chat::Chat pkt;
+                            pkt.Initialize(CHAT_MSG_WHISPER, LANG_UNIVERSAL, nullptr, recv, m.cmsg);
+                            pkt.SenderGUID     = webGuid;
+                            pkt.SenderName     = charName;
+                            pkt.FakeSenderName = true;
+                            recv->SendDirectMessage(pkt.Write());
+                            // Hint so the receiver knows the reply command if /r fails
+                            WorldPackets::Chat::Chat hint;
+                            hint.Initialize(CHAT_MSG_SYSTEM, LANG_UNIVERSAL, nullptr, nullptr,
+                                "[Web] Para responder usa: /w " + charName + " <mensaje>");
+                            recv->SendDirectMessage(hint.Write());
+                        }
+                    }
+                    else if (m.ctype == "guild" || m.ctype == "officer")
+                    {
+                        // Find guild via guild_member and broadcast as system
+                        uint32 guildId = 0;
+                        if (auto gr = LoginDatabase.Query(("SELECT guildid FROM characters.guild_member WHERE guid=" + std::to_string(m.cguid)).c_str()))
+                            guildId = static_cast<uint32>(gr->Fetch()[0].GetUInt64());
+                        if (guildId)
+                        {
+                            if (Guild* g = sGuildMgr->GetGuildById(guildId))
+                            {
+                                WorldPackets::Chat::Chat pkt;
+                                std::string prefix = (m.ctype == "officer") ? "[Oficial Web] " : "[Guild Web] ";
+                                pkt.Initialize(CHAT_MSG_SYSTEM, LANG_UNIVERSAL, nullptr, nullptr,
+                                    prefix + charName + ": " + m.cmsg);
+                                g->BroadcastPacket(pkt.Write());
+                            }
+                        }
+                    }
+                    continue;
+                }
+
+                // Character is online — dispatch normally
+                if (m.ctype == "say")
+                    player->Say(m.cmsg, LANG_UNIVERSAL, player);
+                else if (m.ctype == "yell")
+                    player->Yell(m.cmsg, LANG_UNIVERSAL, player);
+                else if (m.ctype == "emote")
+                    player->TextEmote(m.cmsg, player, false);
+                else if (m.ctype == "whisper") {
+                    if (Player* recv = ObjectAccessor::FindPlayerByName(m.ctarget))
+                        player->Whisper(m.cmsg, LANG_UNIVERSAL, recv, false);
+                } else if (m.ctype == "guild" || m.ctype == "officer") {
+                    if (Guild* g = sGuildMgr->GetGuildById(player->GetGuildId()))
+                        g->BroadcastToGuild(player->GetSession(), m.ctype == "officer", m.cmsg, LANG_UNIVERSAL);
+                } else if (m.ctype == "channel") {
+                    if (Channel* ch = ChannelMgr::GetChannelForPlayerByNamePart(m.cchan, player))
+                        ch->Say(player->GetGUID(), m.cmsg, LANG_UNIVERSAL);
+                }
+            }
+        }
+
+        // Process admin-panel kick requests (queued by rollback/restore operations)
+        if (auto kickRes = LoginDatabase.Query("SELECT id, game_account_id, reason FROM auth.admin_pending_kicks ORDER BY id LIMIT 50"))
+        {
+            do {
+                auto fk = kickRes->Fetch();
+                uint64 rowId     = fk[0].GetUInt64();
+                uint32 accId     = fk[1].GetUInt32();
+                std::string why  = fk[2].GetString();
+                if (WorldSession* sess = FindSession(accId))
+                {
+                    TC_LOG_INFO("server.worldserver", "Admin panel: kicking account {} — {}", accId, why);
+                    sess->KickPlayer(("Admin panel: " + why).c_str());
+                }
+                LoginDatabase.DirectExecute(Trinity::StringFormat("DELETE FROM auth.admin_pending_kicks WHERE id={}", rowId).c_str());
+            } while (kickRes->NextRow());
+        }
     }
 
     if (IsStopped() || m_timers[WUPDATE_CHANNEL_SAVE].Passed())

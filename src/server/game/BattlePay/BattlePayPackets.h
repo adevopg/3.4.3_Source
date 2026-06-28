@@ -169,6 +169,18 @@ namespace WorldPackets
             void Read() override { }
         };
 
+        // El cliente envía esto al pedir un checkout web (pasarela).
+        class BattlePayOpenCheckout final : public ClientPacket
+        {
+        public:
+            BattlePayOpenCheckout(WorldPacket&& packet) : ClientPacket(CMSG_BATTLE_PAY_OPEN_CHECKOUT, std::move(packet)) { }
+
+            void Read() override;
+
+            uint32 ClientToken = 0;        // 1,2,3... se incrementa en cada apertura del checkout
+            std::vector<uint8> RawData;    // bytes restantes tras ClientToken (para RE)
+        };
+
         class PurchaseListResponse final : public ServerPacket
         {
         public:
@@ -178,6 +190,18 @@ namespace WorldPackets
 
             uint32 Result = 0;
             std::vector<Purchase> Purchase;
+        };
+
+        // Respuesta a CMSG_BATTLE_PAY_OPEN_CHECKOUT: abre el checkout web en el cliente.
+        class BattlePayStartCheckout final : public ServerPacket
+        {
+        public:
+            BattlePayStartCheckout() : ServerPacket(SMSG_BATTLE_PAY_START_CHECKOUT, 12) { }
+
+            WorldPacket const* Write() override;
+
+            uint32 ClientToken = 0;
+            uint64 PurchaseID  = 0;
         };
 
         class SyncWowEntitlements final : public ServerPacket

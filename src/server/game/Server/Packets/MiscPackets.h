@@ -942,6 +942,16 @@ namespace WorldPackets
             TimerType Type = Pvp;
         };
 
+        class QueryCountdownTimer final : public ClientPacket
+        {
+        public:
+            QueryCountdownTimer(WorldPacket&& packet) : ClientPacket(CMSG_QUERY_COUNTDOWN_TIMER, std::move(packet)) { }
+
+            void Read() override;
+
+            StartTimer::TimerType Type = StartTimer::Pvp;
+        };
+
         class ConversationLineStarted final : public ClientPacket
         {
         public:

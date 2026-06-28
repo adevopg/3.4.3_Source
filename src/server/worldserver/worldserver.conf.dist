@@ -4458,3 +4458,30 @@ Pvp.FactionBalance.Pct20 = 0.8
 
 #
 ###################################################################################################
+
+###################################################################################################
+# ADMIN AUTO-SNAPSHOT
+#
+#    Admin.AutoSnapshot.Enable
+#        Description: Periodically snapshot all online characters to auth.admin_char_snapshots
+#                     (snap_type=2). Snapshots can be restored from the admin panel Rollback page.
+#        Default:     0 (disabled)
+
+Admin.AutoSnapshot.Enable = 0
+
+#    Admin.AutoSnapshot.Interval
+#        Description: Seconds between snapshot cycles. Minimum enforced: 60.
+#                     Recommended: 1800 (30 min). Lower values increase DB write load.
+#        Default:     1800
+
+Admin.AutoSnapshot.Interval = 1800
+
+#    Admin.AutoSnapshot.KeepCount
+#        Description: How many auto-snapshots (snap_type=2) to keep per character.
+#                     Older ones are pruned after each cycle.
+#        Default:     10
+
+Admin.AutoSnapshot.KeepCount = 10
+
+#
+###################################################################################################

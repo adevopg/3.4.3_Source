@@ -19,6 +19,7 @@
 #define CharacterPackets_h__
 
 #include "Packet.h"
+#include "AddonPackets.h"
 #include "ObjectGuid.h"
 #include "Optional.h"
 #include "PacketUtilities.h"
@@ -29,6 +30,7 @@
 #include "UpdateFields.h"
 #include <array>
 #include <memory>
+#include <vector>
 
 class Field;
 
@@ -588,6 +590,84 @@ namespace WorldPackets
             bool Showing = false;
         };
 
+        struct ClientVariable
+        {
+            std::string Key;
+            std::string Value;
+        };
+
+        class ReportClientVariables final : public ClientPacket
+        {
+        public:
+            ReportClientVariables(WorldPacket&& packet) : ClientPacket(CMSG_REPORT_CLIENT_VARIABLES, std::move(packet)) { }
+
+            void Read() override;
+
+            std::vector<ClientVariable> Variables;
+        };
+
+        class ReportEnabledAddons final : public ClientPacket
+        {
+        public:
+            ReportEnabledAddons(WorldPacket&& packet) : ClientPacket(CMSG_REPORT_ENABLED_ADDONS, std::move(packet)) { }
+
+            void Read() override;
+
+            std::vector<WorldPackets::Addon::AddOnInfo> Addons;
+        };
+
+        struct KeybindingExecutionCount
+        {
+            std::string Binding;
+            uint32 Count = 0;
+        };
+
+        class ReportKeybindingExecutionCounts final : public ClientPacket
+        {
+        public:
+            ReportKeybindingExecutionCounts(WorldPacket&& packet) : ClientPacket(CMSG_REPORT_KEYBINDING_EXECUTION_COUNTS, std::move(packet)) { }
+
+            void Read() override;
+
+            std::vector<KeybindingExecutionCount> Keybindings;
+        };
+
+        class OverrideScreenFlash final : public ClientPacket
+        {
+        public:
+            OverrideScreenFlash(WorldPacket&& packet) : ClientPacket(CMSG_OVERRIDE_SCREEN_FLASH, std::move(packet)) { }
+
+            void Read() override;
+
+            bool Disabled = false;
+        };
+
+        class GetAccountNotifications final : public ClientPacket
+        {
+        public:
+            GetAccountNotifications(WorldPacket&& packet) : ClientPacket(CMSG_GET_ACCOUNT_NOTIFICATIONS, std::move(packet)) { }
+
+            void Read() override { }
+        };
+
+        class AccountNotificationsResponse final : public ServerPacket
+        {
+        public:
+            AccountNotificationsResponse() : ServerPacket(SMSG_ACCOUNT_NOTIFICATIONS_RESPONSE, 0) { }
+
+            WorldPacket const* Write() override { return &_worldPacket; }
+        };
+
+        class UpdateGameTimeState final : public ServerPacket
+        {
+        public:
+            UpdateGameTimeState() : ServerPacket(SMSG_UPDATE_GAME_TIME_STATE, 4) { }
+
+            WorldPacket const* Write() override;
+
+            uint32 State = 0; // 0 = subscription active
+        };
+
         class InitialSetup final : public ServerPacket
         {
         public:
@@ -832,6 +912,29 @@ namespace WorldPackets
             void Read() override;
 
             bool ShowHelm = false;
+        };
+
+        class GetAccountCharacterList final : public ClientPacket
+        {
+        public:
+            GetAccountCharacterList(WorldPacket&& packet) : ClientPacket(CMSG_GET_ACCOUNT_CHARACTER_LIST, std::move(packet)) { }
+
+            void Read() override;
+
+            uint32 Token    = 0;
+            uint32 ListType = 0;
+        };
+
+        class GetAccountCharacterListResult final : public ServerPacket
+        {
+        public:
+            GetAccountCharacterListResult() : ServerPacket(SMSG_GET_ACCOUNT_CHARACTER_LIST_RESULT) { }
+
+            WorldPacket const* Write() override;
+
+            uint32 Token         = 0;
+            uint32 ListType      = 0;
+            std::vector<EnumCharactersResult::CharacterInfo> Characters;
         };
     }
 }

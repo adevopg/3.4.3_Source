@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mysql -u Inna -pLadyamy89 characters -e \"SELECT ca.guid, c.name, c.race, c.class, COUNT\\(ca.achievement\\) as ach_count FROM character_achievement ca JOIN characters c ON ca.guid=c.guid GROUP BY ca.guid, c.name, c.race, c.class ORDER BY ach_count DESC LIMIT 5;\")",
+      "Bash(mysql -u Inna -pLadyamy89 world -e \"SELECT ID, points FROM achievement_dbc WHERE ID IN \\(6,7,8,9,10,11,12,13,891,889,2078\\) ORDER BY ID;\")",
+      "Bash(mysql -u Inna -pLadyamy89 world -e \"SELECT SUM\\(a.points\\), COUNT\\(*\\) FROM achievement_dbc a JOIN characters.character_achievement ca ON a.ID=ca.achievement WHERE ca.guid=1;\")",
+      "Bash(mysql -u Inna -pLadyamy89 world -e \"SELECT COUNT\\(*\\) FROM achievement_dbc;\")",
+      "Bash(mysql -u Inna -pLadyamy89 world -e \"SELECT ID, points FROM achievement_dbc LIMIT 10;\")",
+      "Bash(mysql -u Inna -pLadyamy89 world -e \"SELECT DISTINCT points FROM achievement_dbc ORDER BY points DESC LIMIT 10;\")",
+      "Bash(mysql -u Inna -pLadyamy89 world -e \"SELECT ID FROM achievement_dbc WHERE points > 0 LIMIT 5;\")"
+    ]
+  }
+}

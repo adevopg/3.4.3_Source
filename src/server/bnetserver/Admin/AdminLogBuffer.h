@@ -25,8 +25,9 @@ public:
     std::vector<AdminLogEntry> GetSince(uint64_t seq) const;
     uint64_t GetLatestSeq() const;
 
-    std::atomic<bool>  Running  { true  };
-    std::atomic<int>   Sessions { 0     };
+    std::atomic<bool>  Running         { true  };
+    std::atomic<bool>  MaintenanceMode { false };
+    std::atomic<int>   Sessions        { 0     };
     time_t             StartTime{ 0     };
     int                BnetPort { 1119  };
     int                HttpPort { 8081  };

@@ -262,6 +262,27 @@ void WorldPackets::BattlePay::StartPurchase::Read()
     _worldPacket >> TargetCharacter;
 }
 
+void WorldPackets::BattlePay::BattlePayOpenCheckout::Read()
+{
+    if (_worldPacket.size() - _worldPacket.rpos() >= 4)
+        _worldPacket >> ClientToken;
+
+    // Captura los bytes restantes tras ClientToken para diagnóstico/RE.
+    size_t remaining = _worldPacket.size() - _worldPacket.rpos();
+    RawData.resize(remaining);
+    for (size_t i = 0; i < remaining; ++i)
+        _worldPacket >> RawData[i];
+}
+
+WorldPacket const* WorldPackets::BattlePay::BattlePayStartCheckout::Write()
+{
+    _worldPacket << uint32(ClientToken);
+    _worldPacket << uint64(PurchaseID);
+    // TODO: datos del checkout (productos / precio / moneda / URL) — estructura
+    // exacta del cliente 3.4.3 por confirmar según su comportamiento.
+    return &_worldPacket;
+}
+
 /*void WorldPackets::BattlePay::PurchaseProduct::Read()
 {
     _worldPacket >> ClientToken;

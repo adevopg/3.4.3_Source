@@ -534,6 +534,10 @@ bool WorldSession::Update(uint32 diff, PacketFilter& updater)
 
     ProcessQueryCallbacks();
 
+    // Battlepay (SumUp): entrega de órdenes pagadas para el jugador conectado.
+    if (GetPlayer() && GetPlayer()->IsInWorld() && GetBattlePayMgr())
+        GetBattlePayMgr()->Update(diff);
+
     //check if we are safe to proceed with logout
     //logout procedure should happen only in World::UpdateSessions() method!!!
     if (updater.ProcessUnsafe())

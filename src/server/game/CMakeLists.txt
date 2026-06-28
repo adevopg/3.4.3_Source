@@ -55,11 +55,6 @@ target_link_libraries(game
   PUBLIC
     game-interface)
 
-if (HIREDIS_FOUND)
-  message(STATUS "Linking hiredis into game module: ${HIREDIS_LIB}")
-  target_link_libraries(game PRIVATE ${HIREDIS_LIB})
-endif()
-
 set_target_properties(game
     PROPERTIES
       FOLDER
