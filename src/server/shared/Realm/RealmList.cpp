@@ -235,6 +235,12 @@ bool RealmList::GetRealmNames(Battlenet::RealmHandle const& id, std::string* nam
     return true;
 }
 
+RealmList::RealmMap RealmList::GetAllRealms() const
+{
+    std::shared_lock<std::shared_mutex> lock(_realmsMutex);
+    return _realms;
+}
+
 RealmBuildInfo const* RealmList::GetBuildInfo(uint32 build) const
 {
     for (RealmBuildInfo const& clientBuild : _builds)

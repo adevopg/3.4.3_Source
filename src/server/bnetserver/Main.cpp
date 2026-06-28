@@ -24,6 +24,14 @@
 */
 
 #include "AppenderDB.h"
+#if TRINITY_PLATFORM == TRINITY_PLATFORM_WINDOWS
+#include "AdminLogBuffer.h"
+#include "AdminService.h"
+#include "AppenderGUI.h"
+#include "BnetServerWindow.h"
+#include <shellapi.h>
+#include <thread>
+#endif
 #include "Banner.h"
 #include "BigNumber.h"
 #include "Config.h"
@@ -141,8 +149,28 @@ int main(int argc, char** argv)
 
     std::vector<std::string> overriddenKeys = sConfigMgr->OverrideWithEnvVariablesIfAny();
 
+#if TRINITY_PLATFORM == TRINITY_PLATFORM_WINDOWS
+    bool guiMode = vm.count("gui") > 0;
+    if (guiMode)
+    {
+        sLog->RegisterAppender<AppenderGUI>();
+        if (!BnetServerWindow::Initialize(GetModuleHandle(nullptr)))
+        {
+            printf("Failed to initialize GUI window\n");
+            return 1;
+        }
+        BnetServerWindow::UpdateTitle("Iniciando...");
+    }
+#endif
     sLog->RegisterAppender<AppenderDB>();
     sLog->Initialize(nullptr);
+#if TRINITY_PLATFORM == TRINITY_PLATFORM_WINDOWS
+    if (guiMode)
+    {
+        sLog->CreateAppenderFromConfigLine("Appender.GUI", "4,2,3");
+        sLog->AddAppenderToExistingLoggers("GUI");
+    }
+#endif
 
     Trinity::Banner::Show("bnetserver",
         [](char const* text)
@@ -236,6 +264,23 @@ int main(int argc, char** argv)
         return 1;
     }
 
+    // Admin web panel
+#if TRINITY_PLATFORM == TRINITY_PLATFORM_WINDOWS
+    int32 adminPort = sConfigMgr->GetIntDefault("Admin.Port", 8083);
+    if (adminPort > 0 && adminPort <= 0xFFFF)
+    {
+        sAdminBuf.BnetPort  = bnport;
+        sAdminBuf.HttpPort  = httpPort;
+        sAdminBuf.TactPort  = tactPort > 0 ? tactPort : 0;
+        sAdminBuf.StartTime = time(nullptr);
+        sAdminBuf.Version   = GitRevision::GetFullVersion();
+
+        if (!sAdminService.StartNetwork(*ioContext, httpBindIp, uint16(adminPort)))
+            TC_LOG_WARN("server.bnetserver", "Failed to start admin panel on port {}", adminPort);
+    }
+    std::shared_ptr<void> sAdminServiceHandle(nullptr, [adminPort](void*) { if (adminPort > 0 && adminPort <= 0xFFFF) sAdminService.StopNetwork(); });
+#endif
+
     // Get the list of realms for the server
     sRealmList->Initialize(*ioContext, sConfigMgr->GetIntDefault("RealmsStateUpdateDelay", 10));
 
@@ -295,7 +340,39 @@ int main(int argc, char** argv)
 #endif
 
     // Start the io service worker loop
-    ioContext->run();
+#if TRINITY_PLATFORM == TRINITY_PLATFORM_WINDOWS
+    if (guiMode)
+    {
+        BnetServerWindow::SetPorts(bnport, httpPort, tactPort > 0 ? tactPort : 0);
+        BnetServerWindow::SetLogsDir(sLog->GetLogsDir());
+        BnetServerWindow::UpdateTitle("Corriendo");
+
+        auto shutdownFn = [&ioContext]() { ioContext->stop(); };
+        BnetServerWindow::SetShutdownCallback(shutdownFn);
+        sAdminBuf.ShutdownCallback = shutdownFn;
+
+        std::thread ioThread([&ioContext]() { ioContext->run(); });
+
+        FreeConsole();
+
+        // Open admin panel in default browser
+        if (adminPort > 0 && adminPort <= 0xFFFF)
+        {
+            char url[64];
+            snprintf(url, sizeof(url), "http://127.0.0.1:%d/", adminPort);
+            ShellExecuteA(nullptr, "open", url, nullptr, nullptr, SW_SHOWNORMAL);
+        }
+
+        BnetServerWindow::Run();
+
+        ioContext->stop();
+        ioThread.join();
+    }
+    else
+#endif
+    {
+        ioContext->run();
+    }
 
     banExpiryCheckTimer->cancel();
     dbPingTimer->cancel();
@@ -411,6 +488,9 @@ variables_map GetConsoleArguments(int argc, char** argv, fs::path& configFile, f
         ("config-dir,cd", value<fs::path>(&configDir)->default_value(fs::absolute(_TRINITY_BNET_CONFIG_DIR)),
             "use <arg> as directory with additional config files")
         ("update-databases-only,u", "updates databases only")
+#if TRINITY_PLATFORM == TRINITY_PLATFORM_WINDOWS
+        ("gui,g", "run with graphical window instead of console")
+#endif
         ;
 #if TRINITY_PLATFORM == TRINITY_PLATFORM_WINDOWS
     options_description win("Windows platform specific options");

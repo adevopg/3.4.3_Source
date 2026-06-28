@@ -80,6 +80,14 @@ LoginREST.LocalAddress=127.0.0.1
 LoginREST.TicketDuration=3600
 
 #
+#    Admin.Port
+#        Description: Port for the web-based admin panel (http://localhost:Admin.Port/)
+#                     Set to 0 to disable.
+#        Default:     8083
+
+Admin.Port = 8083
+
+#
 #
 #    BindIP
 #        Description: Bind auth server to IP/hostname

@@ -175,6 +175,15 @@ void Log::CreateLoggerFromConfigLine(std::string const& loggerName, std::string 
     }
 }
 
+void Log::AddAppenderToExistingLoggers(std::string_view name)
+{
+    Appender* appender = GetAppenderByName(name);
+    if (!appender)
+        return;
+    for (auto& [logName, logger] : loggers)
+        logger->addAppender(appender->getId(), appender);
+}
+
 void Log::CreateLoggerFromConfig(std::string const& loggerName)
 {
     CreateLoggerFromConfigLine(loggerName, sConfigMgr->GetStringDefault(loggerName, ""));

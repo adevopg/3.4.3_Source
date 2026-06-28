@@ -105,6 +105,7 @@ class TC_COMMON_API Log
 
         void CreateAppenderFromConfigLine(std::string const& name, std::string const& options);
         void CreateLoggerFromConfigLine(std::string const& name, std::string const& options);
+        void AddAppenderToExistingLoggers(std::string_view name);
 
         template <typename StringOrStringView>
         static constexpr std::string_view make_string_view(StringOrStringView const& stringOrStringView)

@@ -65,6 +65,7 @@ public:
 
     Realm const* GetRealm(Battlenet::RealmHandle const& id) const;
     bool GetRealmNames(Battlenet::RealmHandle const& id, std::string* name, std::string* normalizedName) const;
+    RealmMap GetAllRealms() const;
 
     RealmBuildInfo const* GetBuildInfo(uint32 build) const;
     uint32 GetMinorMajorBugfixVersionForBuild(uint32 build) const;
